@@ -1,0 +1,13 @@
+bin/
+data/
+.git/
+.gitignore
+.agents/
+.env
+*.db
+*.md
+Dockerfile
+docker-compose.yml
+Makefile
+config.yaml
+README.md

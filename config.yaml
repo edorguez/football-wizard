@@ -1,0 +1,19 @@
+database:
+  path: data/football-wizard.db
+
+scraper:
+  headlessx_url: http://localhost:38473
+  api_key: CHANGE_ME
+
+scheduler:
+  scrape_time: "01:00"
+  train_day: "Sunday"
+  train_time: "03:00"
+
+model:
+  min_matches_for_prediction: 5
+  form_matches_count: 5
+
+log:
+  level: "info"
+  format: "console"
