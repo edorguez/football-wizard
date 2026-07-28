@@ -1,64 +1,74 @@
 package scraper
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
+	"log/slog"
 	"time"
+
+	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/launcher"
+	"github.com/go-rod/stealth"
 )
 
-type ProgressMsg struct {
-	Text string
-}
-
 type Client struct {
-	apiURL   string
-	apiKey   string
-	http     *http.Client
-	Progress chan ProgressMsg
+	browser *rod.Browser
+	logger  *slog.Logger
 }
 
-func NewClient(apiURL, apiKey string) *Client {
-	return &Client{
-		apiURL:   apiURL,
-		apiKey:   apiKey,
-		http:     &http.Client{Timeout: 60 * time.Second},
-		Progress: make(chan ProgressMsg, 20),
+func NewClient(logger *slog.Logger) (*Client, error) {
+	path, has := launcher.LookPath()
+	if !has {
+		return nil, fmt.Errorf("chrome/chromium not found on system path")
 	}
+
+	url := launcher.New().
+		Bin(path).
+		Headless(true).
+		NoSandbox(true).
+		MustLaunch()
+
+	browser := rod.New().
+		ControlURL(url).
+		Timeout(30 * time.Second).
+		MustConnect()
+
+	return &Client{
+		browser: browser,
+		logger:  logger,
+	}, nil
 }
 
 func (c *Client) FetchHTML(url string) (string, error) {
-	c.Progress <- ProgressMsg{Text: fmt.Sprintf("sending URL to HeadlessX browser: %s", url)}
+	c.logger.Info("fetching page", "url", url)
 
-	body, _ := json.Marshal(map[string]string{"url": url})
-	req, _ := http.NewRequest("POST", c.apiURL+"/api/operators/website/scrape/html-js", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", c.apiKey)
-
-	resp, err := c.http.Do(req)
+	page, err := stealth.Page(c.browser)
 	if err != nil {
-		c.Progress <- ProgressMsg{Text: fmt.Sprintf("ERROR: HeadlessX request failed — %s", err)}
-		return "", fmt.Errorf("headlessx request: %w", err)
+		return "", fmt.Errorf("creating stealth page: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := page.Close(); err != nil {
+			c.logger.Error("closing page", "error", err)
+		}
+	}()
 
-	respBody, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != 200 {
-		c.Progress <- ProgressMsg{Text: fmt.Sprintf("ERROR: HeadlessX returned HTTP %d", resp.StatusCode)}
-		return "", fmt.Errorf("headlessx returned HTTP %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result struct {
-		HTML string `json:"html"`
-	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		c.Progress <- ProgressMsg{Text: fmt.Sprintf("ERROR: parsing HeadlessX response — %s", err)}
-		return "", fmt.Errorf("parsing headlessx response: %w", err)
+	if err := page.Navigate(url); err != nil {
+		return "", fmt.Errorf("navigating to %s: %w", url, err)
 	}
 
-	c.Progress <- ProgressMsg{Text: fmt.Sprintf("HTML received — %d bytes", len(result.HTML))}
-	return result.HTML, nil
+	if err := page.WaitLoad(); err != nil {
+		return "", fmt.Errorf("waiting for page load: %w", err)
+	}
+
+	html, err := page.HTML()
+	if err != nil {
+		return "", fmt.Errorf("getting page HTML: %w", err)
+	}
+
+	c.logger.Info("page fetched", "url", url, "size", len(html))
+
+	return html, nil
+}
+
+func (c *Client) Close() error {
+	return c.browser.Close()
 }

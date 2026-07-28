@@ -2,114 +2,179 @@ package scraper
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/edorguez/football-wizard/internal/database"
 	"github.com/edorguez/football-wizard/internal/repository"
 )
 
 type Saver struct {
-	teamRepo    *repository.TeamRepo
-	matchRepo   *repository.MatchRepo
-	refereeRepo *repository.RefereeRepo
+	teamsRepo   *repository.TeamRepository
+	refsRepo    *repository.RefereeRepository
+	matchesRepo *repository.MatchRepository
+	matchStats  *repository.MatchStatRepository
+	fixtures    *repository.FixtureRepository
+	logger      *slog.Logger
 }
 
-func NewSaver(teamRepo *repository.TeamRepo, matchRepo *repository.MatchRepo, refereeRepo *repository.RefereeRepo) *Saver {
+func NewSaver(
+	teamsRepo *repository.TeamRepository,
+	refsRepo *repository.RefereeRepository,
+	matchesRepo *repository.MatchRepository,
+	matchStats *repository.MatchStatRepository,
+	fixtures *repository.FixtureRepository,
+	logger *slog.Logger,
+) *Saver {
 	return &Saver{
-		teamRepo:    teamRepo,
-		matchRepo:   matchRepo,
-		refereeRepo: refereeRepo,
+		teamsRepo:   teamsRepo,
+		refsRepo:    refsRepo,
+		matchesRepo: matchesRepo,
+		matchStats:  matchStats,
+		fixtures:    fixtures,
+		logger:      logger,
 	}
 }
 
-func (s *Saver) Save(scraped []ScrapedMatch) (int, error) {
-	if len(scraped) == 0 {
-		return 0, nil
-	}
+func (s *Saver) SaveMatches(matches []ScrapedMatch) error {
+	s.logger.Info("saving matches", "count", len(matches))
 
-	if err := s.upsertTeams(scraped); err != nil {
-		return 0, fmt.Errorf("saving teams: %w", err)
-	}
+	teamCache := map[string]uint{}
+	refereeCache := map[string]*uint{}
 
-	if err := s.upsertReferees(scraped); err != nil {
-		return 0, fmt.Errorf("saving referees: %w", err)
-	}
-
-	matches, err := s.buildMatches(scraped)
-	if err != nil {
-		return 0, fmt.Errorf("building matches: %w", err)
-	}
-
-	if err := s.matchRepo.BulkCreate(matches); err != nil {
-		return 0, fmt.Errorf("saving matches: %w", err)
-	}
-
-	return len(matches), nil
-}
-
-func (s *Saver) upsertTeams(scraped []ScrapedMatch) error {
-	seen := map[string]bool{}
-	var teams []database.Team
-	for _, m := range scraped {
-		if !seen[m.HomeTeam] {
-			seen[m.HomeTeam] = true
-			teams = append(teams, database.Team{Name: m.HomeTeam})
-		}
-		if !seen[m.AwayTeam] {
-			seen[m.AwayTeam] = true
-			teams = append(teams, database.Team{Name: m.AwayTeam})
-		}
-	}
-	return s.teamRepo.BulkUpsert(teams)
-}
-
-func (s *Saver) upsertReferees(scraped []ScrapedMatch) error {
-	seen := map[string]bool{}
-	var refs []database.Referee
-	for _, m := range scraped {
-		if m.Referee == "" || seen[m.Referee] {
-			continue
-		}
-		seen[m.Referee] = true
-		refs = append(refs, database.Referee{Name: m.Referee})
-	}
-	if len(refs) == 0 {
-		return nil
-	}
-	return s.refereeRepo.BulkUpsert(refs)
-}
-
-func (s *Saver) buildMatches(scraped []ScrapedMatch) ([]database.Match, error) {
-	var matches []database.Match
-	for _, sm := range scraped {
-		home, err := s.teamRepo.FindByName(sm.HomeTeam)
+	for _, sm := range matches {
+		teamID, err := s.resolveTeam(sm.HomeTeam, teamCache)
 		if err != nil {
-			return nil, fmt.Errorf("looking up home team %q: %w", sm.HomeTeam, err)
+			return fmt.Errorf("resolving team %q: %w", sm.HomeTeam, err)
 		}
-		away, err := s.teamRepo.FindByName(sm.AwayTeam)
+		teamCache[sm.HomeTeam] = teamID
+
+		teamID, err = s.resolveTeam(sm.AwayTeam, teamCache)
 		if err != nil {
-			return nil, fmt.Errorf("looking up away team %q: %w", sm.AwayTeam, err)
+			return fmt.Errorf("resolving team %q: %w", sm.AwayTeam, err)
 		}
-		var refereeID int64
-		if sm.Referee != "" {
-			ref, err := s.refereeRepo.FindByName(sm.Referee)
+		teamCache[sm.AwayTeam] = teamID
+
+		if sm.RefereeName != "" {
+			refID, err := s.resolveReferee(sm.RefereeName, refereeCache)
 			if err != nil {
-				return nil, fmt.Errorf("looking up referee %q: %w", sm.Referee, err)
+				return fmt.Errorf("resolving referee %q: %w", sm.RefereeName, err)
 			}
-			refereeID = ref.ID
+			refereeCache[sm.RefereeName] = refID
+		}
+	}
+
+	s.logger.Info("teams and referees resolved", "teams", len(teamCache))
+
+	for _, sm := range matches {
+		homeGoals := sm.HomeGoals
+		awayGoals := sm.AwayGoals
+
+		match := database.Match{
+			Season:     sm.Season,
+			Round:      sm.Round,
+			Date:       sm.Date,
+			HomeTeamID: teamCache[sm.HomeTeam],
+			AwayTeamID: teamCache[sm.AwayTeam],
+			HomeGoals:  &homeGoals,
+			AwayGoals:  &awayGoals,
+			RefereeID:  refereeCache[sm.RefereeName],
+			Status:     "completed",
 		}
 
-		matches = append(matches, database.Match{
-			Date:       sm.Date,
-			Season:     sm.Season,
-			Matchday:   sm.Matchday,
-			HomeTeamID: home.ID,
-			AwayTeamID: away.ID,
-			HomeGoals:  sm.HomeGoals,
-			AwayGoals:  sm.AwayGoals,
-			RefereeID:  refereeID,
-			Stadium:    sm.Stadium,
-			Attendance: sm.Attendance,
+		if err := s.matchesRepo.Create(&match); err != nil {
+			return fmt.Errorf("creating match %s vs %s: %w", sm.HomeTeam, sm.AwayTeam, err)
+		}
+
+		if sm.HomeShots != nil || sm.AwayShots != nil {
+			stat := database.MatchStat{
+				MatchID:           match.ID,
+				HomeShots:         sm.HomeShots,
+				AwayShots:         sm.AwayShots,
+				HomeShotsOnTarget: sm.HomeShotsOnTarget,
+				AwayShotsOnTarget: sm.AwayShotsOnTarget,
+				HomeCorners:       sm.HomeCorners,
+				AwayCorners:       sm.AwayCorners,
+				HomeYellowCards:   sm.HomeYellowCards,
+				AwayYellowCards:   sm.AwayYellowCards,
+				HomeRedCards:      sm.HomeRedCards,
+				AwayRedCards:      sm.AwayRedCards,
+			}
+			if err := s.matchStats.Create(&stat); err != nil {
+				return fmt.Errorf("creating match stats for match %d: %w", match.ID, err)
+			}
+		}
+	}
+
+	s.logger.Info("matches saved successfully", "count", len(matches))
+
+	return nil
+}
+
+func (s *Saver) SaveFixtures(fixtures []ScrapedFixture) error {
+	s.logger.Info("saving fixtures", "count", len(fixtures))
+
+	teamCache := map[string]uint{}
+
+	dbFixtures := make([]database.Fixture, 0, len(fixtures))
+
+	for _, sf := range fixtures {
+		teamID, err := s.resolveTeam(sf.HomeTeam, teamCache)
+		if err != nil {
+			return fmt.Errorf("resolving team %q: %w", sf.HomeTeam, err)
+		}
+		teamCache[sf.HomeTeam] = teamID
+
+		teamID, err = s.resolveTeam(sf.AwayTeam, teamCache)
+		if err != nil {
+			return fmt.Errorf("resolving team %q: %w", sf.AwayTeam, err)
+		}
+		teamCache[sf.AwayTeam] = teamID
+
+		dbFixtures = append(dbFixtures, database.Fixture{
+			Season:     sf.Season,
+			Round:      sf.Round,
+			Date:       sf.Date,
+			HomeTeamID: teamCache[sf.HomeTeam],
+			AwayTeamID: teamCache[sf.AwayTeam],
+			Status:     "scheduled",
 		})
 	}
-	return matches, nil
+
+	return s.fixtures.BulkCreate(dbFixtures)
+}
+
+func (s *Saver) resolveTeam(name string, cache map[string]uint) (uint, error) {
+	if id, ok := cache[name]; ok {
+		return id, nil
+	}
+
+	team := &database.Team{
+		Name:      name,
+		ShortName: name,
+		Country:   "Brazil",
+	}
+
+	if err := s.teamsRepo.Upsert(team); err != nil {
+		return 0, fmt.Errorf("upserting team %q: %w", name, err)
+	}
+
+	s.logger.Debug("team upserted", "name", name, "id", team.ID)
+
+	return team.ID, nil
+}
+
+func (s *Saver) resolveReferee(name string, cache map[string]*uint) (*uint, error) {
+	if id, ok := cache[name]; ok {
+		return id, nil
+	}
+
+	referee := &database.Referee{Name: name}
+
+	if err := s.refsRepo.Upsert(referee); err != nil {
+		return nil, fmt.Errorf("upserting referee %q: %w", name, err)
+	}
+
+	s.logger.Debug("referee upserted", "name", name, "id", referee.ID)
+
+	return &referee.ID, nil
 }

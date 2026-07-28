@@ -36,3 +36,7 @@ Thumbs.db
 
 # Go
 vendor/
+
+# go-rod temporary browser data
+browser-data/
+tmp/rod/
