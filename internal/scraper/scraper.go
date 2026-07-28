@@ -22,7 +22,10 @@ func NewScraper(client *Client, saver *Saver, logger *slog.Logger) *Scraper {
 func (s *Scraper) ScrapeSeason(season int) error {
 	s.logger.Info("starting scrape", "season", season)
 
-	url := fmt.Sprintf("https://fbref.com/en/comps/24/%d/schedule/%d-Serie-A-schedule", season, season)
+	url := fmt.Sprintf(
+		"https://fbref.com/en/comps/24/%d/schedule/%d-Serie-A-Scores-and-Fixtures",
+		season, season,
+	)
 
 	html, err := s.client.FetchHTML(url)
 	if err != nil {
@@ -38,6 +41,14 @@ func (s *Scraper) ScrapeSeason(season int) error {
 
 	if err := s.saver.SaveMatches(matches); err != nil {
 		return fmt.Errorf("saving season %d: %w", season, err)
+	}
+
+	fixtures, err := ParseFixtures(season, html)
+	if err == nil && len(fixtures) > 0 {
+		s.logger.Info("parsed fixtures", "season", season, "count", len(fixtures))
+		if err := s.saver.SaveFixtures(fixtures); err != nil {
+			return fmt.Errorf("saving fixtures for season %d: %w", season, err)
+		}
 	}
 
 	s.logger.Info("season scraped successfully", "season", season, "matches", len(matches))

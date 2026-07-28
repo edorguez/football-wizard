@@ -6,13 +6,14 @@ GOTAGS   :=
 .PHONY: build run dev test clean
 
 build:
-	@mkdir -p bin
+	@mkdir -p bin data
 	go build $(GOFLAGS) -o $(BINARY) ./cmd/football-wizard
 
 run: build
 	./$(BINARY) $(ARGS)
 
 dev:
+	@mkdir -p data
 	go run ./cmd/football-wizard $(ARGS)
 
 test:
@@ -21,3 +22,7 @@ test:
 clean:
 	rm -rf bin/
 	rm -rf data/
+
+# Catch-all: prevent make errors from stray args
+%:
+	@:  # ignore unknown targets

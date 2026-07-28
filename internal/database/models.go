@@ -21,11 +21,11 @@ type Referee struct {
 
 type Match struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
-	Season      int       `gorm:"index;not null" json:"season"`
-	Round       int       `json:"round"`
+	Season      int       `gorm:"uniqueIndex:idx_season_round_teams;not null" json:"season"`
+	Round       int       `gorm:"uniqueIndex:idx_season_round_teams;not null" json:"round"`
 	Date        time.Time `gorm:"index" json:"date"`
-	HomeTeamID  uint      `gorm:"not null" json:"home_team_id"`
-	AwayTeamID  uint      `gorm:"not null" json:"away_team_id"`
+	HomeTeamID  uint      `gorm:"uniqueIndex:idx_season_round_teams;not null" json:"home_team_id"`
+	AwayTeamID  uint      `gorm:"uniqueIndex:idx_season_round_teams;not null" json:"away_team_id"`
 	HomeGoals   *int      `json:"home_goals"`
 	AwayGoals   *int      `json:"away_goals"`
 	RefereeID   *uint     `json:"referee_id"`

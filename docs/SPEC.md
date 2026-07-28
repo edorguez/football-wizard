@@ -1,6 +1,6 @@
 # Football Wizard — Technical Specification
 
-Interactive TUI application for predicting Brasileirão Serie A matches. Scrapes FBref via **go-rod + go-rod/stealth** (Chrome headless with anti-detection), trains statistical models in pure Go, and displays results through a Bubble Tea terminal UI.
+Interactive TUI application for predicting Brasileirão Serie A matches. Scrapes FBref via **HeadlessX** (self-hosted anti-detect browser platform powered by Camoufox/Firefox), trains statistical models in pure Go, and displays results through a Bubble Tea terminal UI.
 
 ## Tech Stack
 
@@ -8,7 +8,7 @@ Interactive TUI application for predicting Brasileirão Serie A matches. Scrapes
 |-------|-----------|
 | Language | Go 1.25+ |
 | CLI Visual | Bubble Tea + Lipgloss |
-| Scraping | go-rod + go-rod/stealth (Chrome headless) |
+| Scraping | HeadlessX (Camoufox/Firefox anti-detect, self-hosted via Docker) |
 | Database | SQLite + GORM |
 | Statistics/ML | Gonum (Poisson, Logistic Regression) |
 | Confidence | Threshold-based (probability output) |
@@ -20,14 +20,11 @@ Interactive TUI application for predicting Brasileirão Serie A matches. Scrapes
 
 ## Data Source
 
-- **Single source**: FBref, scraped via **go-rod + go-rod/stealth**
-- go-rod lanza Chrome headless real que ejecuta JavaScript
-- go-rod/stealth module parchea señales de detección:
-  - `navigator.webdriver` (ocultado)
-  - `navigator.plugins`, `languages`, `hardwareConcurrency`
-  - WebGL fingerprint (canvas renderer)
-  - `navigator.permissions`
-- Sin dependencias externas (no requiere APIs de terceros)
+- **Single source**: FBref, scraped via **HeadlessX**
+- HeadlessX es una plataforma self-hosted que usa **Camoufox** (Firefox con parches anti-detección)
+- Se despliega via Docker Compose (PostgreSQL, Redis, API, Web, Worker)
+- API REST protegida con API key en `http://localhost:38473`
+- Sin dependencias externas de scraping (self-hosted, sin coste por request)
 
 ## Prediction Models
 
@@ -56,7 +53,7 @@ cmd/football-wizard/main.go  →  DI wiring
   ├── internal/database/      →  SQLite + GORM connection + migrations
   ├── internal/repository/    →  Data access (Team, Match, Fixture, Prediction, Referee)
   ├── internal/scraper/
-  │   ├── client.go           →  go-rod + stealth browser client
+  │   ├── client.go           →  HeadlessX API client (POST /api/operators/website/scrape/html-js)
   │   ├── parser.go           →  FBref HTML → goquery → ScrapedMatch
   │   ├── saver.go            →  ScrapedMatch → DB (upsert teams, refs, matches)
   │   └── models.go           →  ScrapedMatch, ScrapedFixture structs
@@ -82,9 +79,8 @@ cmd/football-wizard/main.go  →  DI wiring
 ```
 User enters season → Parser.ParseMatchResults(season)
   → Client.FetchHTML(url):
-    → go-rod: lanza Chrome headless
-    → go-rod/stealth: parchea detección (webdriver, plugins, WebGL)
-    → Chrome navega FBref, ejecuta JS, resuelve Cloudflare
+    → POST /api/operators/website/scrape/html-js (HeadlessX API)
+    → HeadlessX: Camoufox (Firefox anti-detect) navega FBref, ejecuta JS, resuelve Cloudflare
     → Extrae HTML renderizado (~800KB)
   → goquery parsea HTML en []ScrapedMatch
   → Saver.Save():
@@ -110,7 +106,7 @@ Runs the scheduler headless (daily scrape at 1AM, weekly retrain Sunday 3AM).
 - [x] Config (Viper) + Logger (slog)
 - [x] SQLite + GORM + migrations (teams, refs, matches, match_stats, fixtures)
 - [x] Makefile with dev commands
-- [x] go-rod + stealth integration
+- [x] HeadlessX integration (self-hosted Docker stack + REST API)
 - [x] goquery HTML parser
 - [x] Saver: scraped data → SQLite (teams, refs, matches)
 - [ ] Real-time log viewer inside TUI

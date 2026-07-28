@@ -35,7 +35,7 @@ func TestMatchRepository_Create(t *testing.T) {
 		Status:     "completed",
 	}
 
-	err := matchRepo.Create(match)
+	err := matchRepo.Upsert(match)
 
 	is := assert.New(t)
 
@@ -63,7 +63,7 @@ func TestMatchRepository_ListBySeason(t *testing.T) {
 			AwayTeamID: away.ID,
 			Status:     "completed",
 		}
-		require.NoError(t, matchRepo.Create(match))
+		require.NoError(t, matchRepo.Upsert(match))
 	}
 
 	matches, err := matchRepo.ListBySeason(2025)
@@ -94,7 +94,7 @@ func TestMatchRepository_ListByTeam(t *testing.T) {
 			Status:     "completed",
 			Date:       time.Date(2025, time.Month(i), 1, 0, 0, 0, 0, time.UTC),
 		}
-		require.NoError(t, matchRepo.Create(match))
+		require.NoError(t, matchRepo.Upsert(match))
 	}
 
 	matches, err := matchRepo.ListByTeam(team.ID)

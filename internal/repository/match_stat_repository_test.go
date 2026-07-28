@@ -27,7 +27,7 @@ func TestMatchStatRepository_Create(t *testing.T) {
 		AwayTeamID: away.ID,
 		Status:     "completed",
 	}
-	require.NoError(t, matchRepo.Create(match))
+	require.NoError(t, matchRepo.Upsert(match))
 
 	shots := 10
 	stat := &database.MatchStat{
@@ -62,7 +62,7 @@ func TestMatchStatRepository_FindByMatchID(t *testing.T) {
 		AwayTeamID: away.ID,
 		Status:     "completed",
 	}
-	require.NoError(t, matchRepo.Create(match))
+	require.NoError(t, matchRepo.Upsert(match))
 
 	s := 5
 	stat := &database.MatchStat{MatchID: match.ID, HomeShots: &s}

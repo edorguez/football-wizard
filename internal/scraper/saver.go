@@ -12,7 +12,6 @@ type Saver struct {
 	teamsRepo   *repository.TeamRepository
 	refsRepo    *repository.RefereeRepository
 	matchesRepo *repository.MatchRepository
-	matchStats  *repository.MatchStatRepository
 	fixtures    *repository.FixtureRepository
 	logger      *slog.Logger
 }
@@ -21,7 +20,6 @@ func NewSaver(
 	teamsRepo *repository.TeamRepository,
 	refsRepo *repository.RefereeRepository,
 	matchesRepo *repository.MatchRepository,
-	matchStats *repository.MatchStatRepository,
 	fixtures *repository.FixtureRepository,
 	logger *slog.Logger,
 ) *Saver {
@@ -29,7 +27,6 @@ func NewSaver(
 		teamsRepo:   teamsRepo,
 		refsRepo:    refsRepo,
 		matchesRepo: matchesRepo,
-		matchStats:  matchStats,
 		fixtures:    fixtures,
 		logger:      logger,
 	}
@@ -81,27 +78,8 @@ func (s *Saver) SaveMatches(matches []ScrapedMatch) error {
 			Status:     "completed",
 		}
 
-		if err := s.matchesRepo.Create(&match); err != nil {
+		if err := s.matchesRepo.Upsert(&match); err != nil {
 			return fmt.Errorf("creating match %s vs %s: %w", sm.HomeTeam, sm.AwayTeam, err)
-		}
-
-		if sm.HomeShots != nil || sm.AwayShots != nil {
-			stat := database.MatchStat{
-				MatchID:           match.ID,
-				HomeShots:         sm.HomeShots,
-				AwayShots:         sm.AwayShots,
-				HomeShotsOnTarget: sm.HomeShotsOnTarget,
-				AwayShotsOnTarget: sm.AwayShotsOnTarget,
-				HomeCorners:       sm.HomeCorners,
-				AwayCorners:       sm.AwayCorners,
-				HomeYellowCards:   sm.HomeYellowCards,
-				AwayYellowCards:   sm.AwayYellowCards,
-				HomeRedCards:      sm.HomeRedCards,
-				AwayRedCards:      sm.AwayRedCards,
-			}
-			if err := s.matchStats.Create(&stat); err != nil {
-				return fmt.Errorf("creating match stats for match %d: %w", match.ID, err)
-			}
 		}
 	}
 

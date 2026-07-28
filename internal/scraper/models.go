@@ -12,17 +12,6 @@ type ScrapedMatch struct {
 	HomeGoals int
 	AwayGoals int
 
-	HomeShots        *int
-	AwayShots        *int
-	HomeShotsOnTarget *int
-	AwayShotsOnTarget *int
-	HomeCorners      *int
-	AwayCorners      *int
-	HomeYellowCards  *int
-	AwayYellowCards  *int
-	HomeRedCards     *int
-	AwayRedCards     *int
-
 	RefereeName string
 }
 

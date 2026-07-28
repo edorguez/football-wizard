@@ -2,14 +2,18 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
+	"strings"
 
+	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
 )
 
 type Config struct {
-	Database  DatabaseConfig  `mapstructure:"database"`
-	Scheduler SchedulerConfig `mapstructure:"scheduler"`
-	Log       LogConfig       `mapstructure:"log"`
+	Database  DatabaseConfig   `mapstructure:"database"`
+	Scheduler SchedulerConfig  `mapstructure:"scheduler"`
+	Log       LogConfig        `mapstructure:"log"`
+	HeadlessX HeadlessXConfig  `mapstructure:"headlessx"`
 }
 
 type DatabaseConfig struct {
@@ -27,7 +31,16 @@ type LogConfig struct {
 	Format string `mapstructure:"format"`
 }
 
+type HeadlessXConfig struct {
+	APIURL string `mapstructure:"api_url"`
+	APIKey string `mapstructure:"api_key"`
+}
+
 func Load(path string) (*Config, error) {
+	if err := godotenv.Load(); err != nil {
+		slog.Debug("no .env file found, using config.yaml and system env")
+	}
+
 	v := viper.New()
 
 	v.SetConfigFile(path)
@@ -39,7 +52,10 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("scheduler.train_time", "03:00")
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "json")
+	v.SetDefault("headlessx.api_url", "http://localhost:38473")
+	v.SetDefault("headlessx.api_key", "")
 
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
 	if err := v.ReadInConfig(); err != nil {

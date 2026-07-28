@@ -1,10 +1,10 @@
 # Football Wizard ⚽🔮
 
-Interactive TUI for predicting **Brasileirão Serie A** matches. Scrapes FBref via **go-rod + go-rod/stealth** (Chrome headless with anti-detection), trains statistical models in pure Go, and displays results through a Bubble Tea terminal UI.
+Interactive TUI for predicting **Brasileirão Serie A** matches. Scrapes FBref via **HeadlessX** (self-hosted anti-detect browser platform), trains statistical models in pure Go, and displays results through a Bubble Tea terminal UI.
 
 ## Features
 
-- **Scraping** from FBref via go-rod + stealth — Chrome headless que pasa Cloudflare
+- **Scraping** from FBref via HeadlessX — self-hosted Camoufox/Firefox que pasa Cloudflare
 - **Real-time log viewer** inside the TUI showing every scraping step
 - **Auto-save** scraped data to local SQLite
 - **Prediction models**: Poisson (expected goals), Logistic Regression (BTTS, O/U), Decision Tree (confidence)
@@ -16,25 +16,30 @@ Interactive TUI for predicting **Brasileirão Serie A** matches. Scrapes FBref v
 ## Requirements
 
 - Go 1.25+
-- Chrome or Chromium (for go-rod browser engine)
+- Docker with Compose v2 (for HeadlessX)
+- Node.js 22+ (for HeadlessX CLI)
 - SQLite (bundled via CGO)
 
 ## Quick start
 
 ```bash
-# 1. Install Chrome (macOS)
-brew install --cask google-chrome
+# 1. Install HeadlessX (self-hosted scraping platform)
+npm install -g @headlessx-cli/core
+headlessx init --mode self-host
+headlessx status
 
-# Or Chromium (Linux)
-sudo apt install chromium-browser
+# 2. Create an API key from http://localhost:34872 or via the API
 
-# 2. Clone and build
+# 3. Clone and build
 git clone https://github.com/edorguez/football-wizard
 cd football-wizard
 make build
 
-# 3. Run the app
-make run
+# 4. Set your HeadlessX API key
+# Edit config.yaml or set HEADLESSX_API_KEY env var
+
+# 5. Run the app
+make dev -- --season 2025
 ```
 
 ## Configuration
@@ -48,7 +53,36 @@ scheduler:
   scrape_time: "01:00"
   train_day: "Sunday"
   train_time: "03:00"
+headlessx:
+  api_url: http://localhost:38473
+  api_key: ""  # required - set your HeadlessX API key here
 ```
+
+All values can be overridden via environment variables (e.g. `DATABASE_PATH`, `LOG_LEVEL`). Copy `.env.example` to `.env` for local overrides.
+
+## HeadlessX (Scraping Service)
+
+This project uses [HeadlessX](https://github.com/saifyxpro/HeadlessX) to scrape FBref. HeadlessX is a self-hosted anti-detect browser platform that bypasses Cloudflare using Camoufox (Firefox). It runs in a Docker stack:
+
+- Dashboard: http://localhost:34872
+- API: http://localhost:38473
+
+**First-time setup:**
+```bash
+npm install -g @headlessx-cli/core
+headlessx init --mode self-host
+headlessx status
+```
+
+Then create an API key from the dashboard at `http://localhost:34872` and add it to `config.yaml` or the `HEADLESSX_API_KEY` env var.
+
+## Data Storage
+
+Scraped match data is stored in a local SQLite database at `data/football-wizard.db` by default. The `data/` directory is created automatically by `make build`, `make dev`, and `make run`.
+
+- **Database location**: configurable via `database.path` in `config.yaml` or `DATABASE_PATH` env var
+- **Data directory**: listed in `.gitignore` — your scraped data stays local
+- **Reset data**: `make clean` removes both `bin/` and `data/`
 
 ## Usage
 
@@ -82,7 +116,7 @@ football-wizard/
 │   ├── database/                   # SQLite + GORM + models
 │   ├── repository/                 # Data access layer (Team, Match, Fixture)
 │   ├── scraper/
-│   │   ├── client.go              # go-rod + stealth browser client
+│   │   ├── client.go              # HeadlessX API client
 │   │   ├── parser.go              # FBref HTML parser (goquery)
 │   │   ├── saver.go               # Saves scraped data to database
 │   │   └── models.go              # Scraped data structs
@@ -102,7 +136,7 @@ football-wizard/
 |-------|-----------|
 | Language | Go 1.25+ |
 | CLI Visual | Bubble Tea + Lipgloss |
-| Scraping | go-rod + go-rod/stealth |
+| Scraping | HeadlessX (Camoufox/Firefox anti-detect) |
 | Database | SQLite + GORM |
 | Statistics/ML | Gonum (Poisson, Logistic Regression) |
 | Confidence | Threshold-based |

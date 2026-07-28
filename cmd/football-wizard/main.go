@@ -46,21 +46,17 @@ func main() {
 	teamsRepo := repository.NewTeamRepository(db)
 	refsRepo := repository.NewRefereeRepository(db)
 	matchesRepo := repository.NewMatchRepository(db)
-	matchStatsRepo := repository.NewMatchStatRepository(db)
 	fixturesRepo := repository.NewFixtureRepository(db)
 
-	client, err := scraper.NewClient(log)
-	if err != nil {
-		log.Error("creating browser client", "error", err)
+	if cfg.HeadlessX.APIKey == "" {
+		log.Error("headlessx.api_key is required — set it in config.yaml or HEADLESSX_API_KEY env var")
 		os.Exit(1)
 	}
-	defer func() {
-		if err := client.Close(); err != nil {
-			log.Error("closing browser client", "error", err)
-		}
-	}()
 
-	saver := scraper.NewSaver(teamsRepo, refsRepo, matchesRepo, matchStatsRepo, fixturesRepo, log)
+	client := scraper.NewClient(cfg.HeadlessX.APIURL, cfg.HeadlessX.APIKey, log)
+	defer client.Close()
+
+	saver := scraper.NewSaver(teamsRepo, refsRepo, matchesRepo, fixturesRepo, log)
 
 	sc := scraper.NewScraper(client, saver, log)
 

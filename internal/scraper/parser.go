@@ -9,15 +9,31 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
+var errNoMatches = fmt.Errorf("no matches found in HTML")
+
+func tableID(season int) string {
+	return fmt.Sprintf("sched_%d_24_1", season)
+}
+
 func ParseMatchResults(season int, html string) ([]ScrapedMatch, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
 		return nil, fmt.Errorf("parsing HTML: %w", err)
 	}
 
+	table := doc.Find(fmt.Sprintf("table#%s", tableID(season)))
+	if table.Length() == 0 {
+		return nil, fmt.Errorf("table %q not found", tableID(season))
+	}
+
 	var matches []ScrapedMatch
 
-	doc.Find("table#matchlogs tbody tr").Each(func(_ int, row *goquery.Selection) {
+	table.Find("tbody tr").Each(func(_ int, row *goquery.Selection) {
+		score := strings.TrimSpace(row.Find("td[data-stat='score']").Text())
+		if score == "vs" || score == "" {
+			return
+		}
+
 		m, ok := parseMatchRow(season, row)
 		if ok {
 			matches = append(matches, m)
@@ -25,50 +41,37 @@ func ParseMatchResults(season int, html string) ([]ScrapedMatch, error) {
 	})
 
 	if len(matches) == 0 {
-		return nil, fmt.Errorf("no matches found in HTML")
+		return nil, fmt.Errorf("no completed matches found: %w", errNoMatches)
 	}
 
 	return matches, nil
 }
 
 func parseMatchRow(season int, row *goquery.Selection) (ScrapedMatch, bool) {
-	roundClass, exists := row.Attr("data-row")
-	if !exists {
+	round, ok := parseGameweek(row)
+	if !ok {
 		return ScrapedMatch{}, false
 	}
 
-	round, err := strconv.Atoi(roundClass)
-	if err != nil {
+	date, ok := parseDate(row)
+	if !ok {
 		return ScrapedMatch{}, false
 	}
 
-	dateStr := strings.TrimSpace(row.Find("td[data-stat='date']").Text())
-	date, err := time.Parse("2006-01-02", dateStr)
-	if err != nil {
-		return ScrapedMatch{}, false
-	}
-
-	homeTeam := strings.TrimSpace(row.Find("td[data-stat='home_team'] a").Text())
+	homeTeam := extractTeam(row, "home_team")
 	if homeTeam == "" {
-		homeTeam = strings.TrimSpace(row.Find("td[data-stat='home_team']").Text())
+		return ScrapedMatch{}, false
 	}
 
-	awayTeam := strings.TrimSpace(row.Find("td[data-stat='away_team'] a").Text())
+	awayTeam := extractTeam(row, "away_team")
 	if awayTeam == "" {
-		awayTeam = strings.TrimSpace(row.Find("td[data-stat='away_team']").Text())
-	}
-
-	if homeTeam == "" || awayTeam == "" {
 		return ScrapedMatch{}, false
 	}
 
 	scoreStr := strings.TrimSpace(row.Find("td[data-stat='score']").Text())
-	var homeGoals, awayGoals int
-
-	if strings.Contains(scoreStr, "–") {
-		parts := strings.SplitN(scoreStr, "–", 2)
-		homeGoals, _ = strconv.Atoi(strings.TrimSpace(parts[0]))
-		awayGoals, _ = strconv.Atoi(strings.TrimSpace(parts[1]))
+	homeGoals, awayGoals, ok := parseScore(scoreStr)
+	if !ok {
+		return ScrapedMatch{}, false
 	}
 
 	refereeName := strings.TrimSpace(row.Find("td[data-stat='referee'] a").Text())
@@ -76,7 +79,7 @@ func parseMatchRow(season int, row *goquery.Selection) (ScrapedMatch, bool) {
 		refereeName = strings.TrimSpace(row.Find("td[data-stat='referee']").Text())
 	}
 
-	m := ScrapedMatch{
+	return ScrapedMatch{
 		Season:      season,
 		Round:       round,
 		Date:        date,
@@ -85,31 +88,63 @@ func parseMatchRow(season int, row *goquery.Selection) (ScrapedMatch, bool) {
 		HomeGoals:   homeGoals,
 		AwayGoals:   awayGoals,
 		RefereeName: refereeName,
-		HomeShots:           parseIntAttr(row, "shots", "home_"),
-		AwayShots:           parseIntAttr(row, "shots", "away_"),
-		HomeShotsOnTarget:   parseIntAttr(row, "shots_on_target", "home_"),
-		AwayShotsOnTarget:   parseIntAttr(row, "shots_on_target", "away_"),
-		HomeCorners:         parseIntAttr(row, "corner_kicks", "home_"),
-		AwayCorners:         parseIntAttr(row, "corner_kicks", "away_"),
-		HomeYellowCards:     parseIntAttr(row, "yellow_cards", "home_"),
-		AwayYellowCards:     parseIntAttr(row, "yellow_cards", "away_"),
-		HomeRedCards:        parseIntAttr(row, "red_cards", "home_"),
-		AwayRedCards:        parseIntAttr(row, "red_cards", "away_"),
-	}
-
-	return m, true
+	}, true
 }
 
-func parseIntAttr(row *goquery.Selection, stat, prefix string) *int {
-	val := strings.TrimSpace(row.Find(fmt.Sprintf("td[data-stat='%s%s']", prefix, stat)).Text())
-	if val == "" {
-		return nil
+func parseGameweek(row *goquery.Selection) (int, bool) {
+	sel := row.Find("th[data-stat='gameweek'], td[data-stat='gameweek']")
+	text := strings.TrimSpace(sel.Text())
+	if text == "" {
+		return 0, false
 	}
-	n, err := strconv.Atoi(val)
+	n, err := strconv.Atoi(text)
 	if err != nil {
-		return nil
+		return 0, false
 	}
-	return &n
+	return n, true
+}
+
+func parseDate(row *goquery.Selection) (time.Time, bool) {
+	dateStr := strings.TrimSpace(row.Find("td[data-stat='date']").Text())
+	if dateStr == "" {
+		return time.Time{}, false
+	}
+
+	date, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return date, true
+}
+
+func extractTeam(row *goquery.Selection, stat string) string {
+	name := strings.TrimSpace(row.Find(fmt.Sprintf("td[data-stat='%s'] a", stat)).Text())
+	if name == "" {
+		name = strings.TrimSpace(row.Find(fmt.Sprintf("td[data-stat='%s']", stat)).Text())
+	}
+	return name
+}
+
+func parseScore(scoreStr string) (int, int, bool) {
+	scoreStr = strings.ReplaceAll(scoreStr, "\u2013", "-")
+	scoreStr = strings.ReplaceAll(scoreStr, "\u2014", "-")
+
+	parts := strings.SplitN(scoreStr, "-", 2)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+
+	home, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, 0, false
+	}
+
+	away, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return 0, 0, false
+	}
+
+	return home, away, true
 }
 
 func ParseFixtures(season int, html string) ([]ScrapedFixture, error) {
@@ -118,9 +153,19 @@ func ParseFixtures(season int, html string) ([]ScrapedFixture, error) {
 		return nil, fmt.Errorf("parsing fixtures HTML: %w", err)
 	}
 
+	table := doc.Find(fmt.Sprintf("table#%s", tableID(season)))
+	if table.Length() == 0 {
+		return nil, fmt.Errorf("table %q not found", tableID(season))
+	}
+
 	var fixtures []ScrapedFixture
 
-	doc.Find("table#fixtures tbody tr").Each(func(_ int, row *goquery.Selection) {
+	table.Find("tbody tr").Each(func(_ int, row *goquery.Selection) {
+		score := strings.TrimSpace(row.Find("td[data-stat='score']").Text())
+		if score != "vs" {
+			return
+		}
+
 		f, ok := parseFixtureRow(season, row)
 		if ok {
 			fixtures = append(fixtures, f)
@@ -131,33 +176,23 @@ func ParseFixtures(season int, html string) ([]ScrapedFixture, error) {
 }
 
 func parseFixtureRow(season int, row *goquery.Selection) (ScrapedFixture, bool) {
-	roundClass, exists := row.Attr("data-row")
-	if !exists {
+	round, ok := parseGameweek(row)
+	if !ok {
 		return ScrapedFixture{}, false
 	}
 
-	round, err := strconv.Atoi(roundClass)
-	if err != nil {
+	date, ok := parseDate(row)
+	if !ok {
 		return ScrapedFixture{}, false
 	}
 
-	dateStr := strings.TrimSpace(row.Find("td[data-stat='date']").Text())
-	date, err := time.Parse("2006-01-02", dateStr)
-	if err != nil {
-		return ScrapedFixture{}, false
-	}
-
-	homeTeam := strings.TrimSpace(row.Find("td[data-stat='home_team'] a").Text())
+	homeTeam := extractTeam(row, "home_team")
 	if homeTeam == "" {
-		homeTeam = strings.TrimSpace(row.Find("td[data-stat='home_team']").Text())
+		return ScrapedFixture{}, false
 	}
 
-	awayTeam := strings.TrimSpace(row.Find("td[data-stat='away_team'] a").Text())
+	awayTeam := extractTeam(row, "away_team")
 	if awayTeam == "" {
-		awayTeam = strings.TrimSpace(row.Find("td[data-stat='away_team']").Text())
-	}
-
-	if homeTeam == "" || awayTeam == "" {
 		return ScrapedFixture{}, false
 	}
 

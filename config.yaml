@@ -9,3 +9,7 @@ scheduler:
 log:
   level: info
   format: json
+
+headlessx:
+  api_url: http://localhost:38473
+  api_key: ""

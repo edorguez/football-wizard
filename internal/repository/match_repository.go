@@ -3,6 +3,7 @@ package repository
 import (
 	"github.com/edorguez/football-wizard/internal/database"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type MatchRepository struct {
@@ -13,8 +14,11 @@ func NewMatchRepository(db *gorm.DB) *MatchRepository {
 	return &MatchRepository{db: db}
 }
 
-func (r *MatchRepository) Create(match *database.Match) error {
-	return r.db.Create(match).Error
+func (r *MatchRepository) Upsert(match *database.Match) error {
+	return r.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "season"}, {Name: "round"}, {Name: "home_team_id"}, {Name: "away_team_id"}},
+		UpdateAll: true,
+	}).Create(match).Error
 }
 
 func (r *MatchRepository) BulkCreate(matches []database.Match) error {
