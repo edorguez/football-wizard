@@ -8,7 +8,7 @@ scheduler:
 
 log:
   level: info
-  format: json
+  format: colored
 
 headlessx:
   api_url: http://localhost:38473

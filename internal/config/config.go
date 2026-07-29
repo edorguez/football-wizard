@@ -51,7 +51,7 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("scheduler.train_day", "Sunday")
 	v.SetDefault("scheduler.train_time", "03:00")
 	v.SetDefault("log.level", "info")
-	v.SetDefault("log.format", "json")
+	v.SetDefault("log.format", "colored")
 	v.SetDefault("headlessx.api_url", "http://localhost:38473")
 	v.SetDefault("headlessx.api_key", "")
 

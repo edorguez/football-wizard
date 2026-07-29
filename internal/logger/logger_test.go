@@ -21,8 +21,27 @@ func TestNew_DefaultFormat(t *testing.T) {
 
 	log.Info("hello")
 
-	assert.Contains(t, buf.String(), "hello")
-	assert.Contains(t, buf.String(), `"msg"`)
+	output := buf.String()
+	assert.Contains(t, output, "hello")
+	assert.Contains(t, output, "[INF]")
+}
+
+func TestNew_JSONFormat(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	log := New(Config{
+		Level:  "info",
+		Format: "json",
+		Output: &buf,
+	})
+
+	log.Info("hello world")
+
+	output := buf.String()
+	assert.Contains(t, output, "hello world")
+	assert.Contains(t, output, `"msg"`)
 }
 
 func TestNew_TextFormat(t *testing.T) {

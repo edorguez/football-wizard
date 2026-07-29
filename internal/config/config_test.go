@@ -54,7 +54,7 @@ func TestLoad_Defaults(t *testing.T) {
 	is.Equal("Sunday", cfg.Scheduler.TrainDay)
 	is.Equal("03:00", cfg.Scheduler.TrainTime)
 	is.Equal("info", cfg.Log.Level)
-	is.Equal("json", cfg.Log.Format)
+	is.Equal("colored", cfg.Log.Format)
 }
 
 func TestLoad_InvalidYAML(t *testing.T) {

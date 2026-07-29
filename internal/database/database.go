@@ -2,15 +2,27 @@ package database
 
 import (
 	"fmt"
+	"log"
+	"os"
+	"time"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
+var dbLogger = logger.New(
+	log.New(os.Stderr, "\r", 0),
+	logger.Config{
+		SlowThreshold:             time.Second,
+		LogLevel:                  logger.Error,
+		IgnoreRecordNotFoundError: true,
+	},
+)
+
 func Connect(path string) (*gorm.DB, error) {
 	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
+		Logger: dbLogger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
@@ -42,6 +54,11 @@ func Migrate(db *gorm.DB) error {
 		&Referee{},
 		&Match{},
 		&MatchStat{},
+		&Player{},
+		&TeamSquadMember{},
+		&MatchLineup{},
+		&MatchPlayerStat{},
+		&MatchSubstitution{},
 		&Fixture{},
 	)
 }

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/edorguez/football-wizard/internal/database"
+	"github.com/edorguez/football-wizard/internal/logger"
 	"github.com/edorguez/football-wizard/internal/repository"
 )
 
@@ -12,6 +13,8 @@ type Saver struct {
 	teamsRepo   *repository.TeamRepository
 	refsRepo    *repository.RefereeRepository
 	matchesRepo *repository.MatchRepository
+	playersRepo *repository.PlayerRepository
+	lineupRepo  *repository.LineupRepository
 	fixtures    *repository.FixtureRepository
 	logger      *slog.Logger
 }
@@ -20,6 +23,8 @@ func NewSaver(
 	teamsRepo *repository.TeamRepository,
 	refsRepo *repository.RefereeRepository,
 	matchesRepo *repository.MatchRepository,
+	playersRepo *repository.PlayerRepository,
+	lineupRepo *repository.LineupRepository,
 	fixtures *repository.FixtureRepository,
 	logger *slog.Logger,
 ) *Saver {
@@ -27,6 +32,8 @@ func NewSaver(
 		teamsRepo:   teamsRepo,
 		refsRepo:    refsRepo,
 		matchesRepo: matchesRepo,
+		playersRepo: playersRepo,
+		lineupRepo:  lineupRepo,
 		fixtures:    fixtures,
 		logger:      logger,
 	}
@@ -67,15 +74,20 @@ func (s *Saver) SaveMatches(matches []ScrapedMatch) error {
 		awayGoals := sm.AwayGoals
 
 		match := database.Match{
-			Season:     sm.Season,
-			Round:      sm.Round,
-			Date:       sm.Date,
-			HomeTeamID: teamCache[sm.HomeTeam],
-			AwayTeamID: teamCache[sm.AwayTeam],
-			HomeGoals:  &homeGoals,
-			AwayGoals:  &awayGoals,
-			RefereeID:  refereeCache[sm.RefereeName],
-			Status:     "completed",
+			Season:        sm.Season,
+			Round:         sm.Round,
+			Date:          sm.Date,
+			HomeTeamID:    teamCache[sm.HomeTeam],
+			AwayTeamID:    teamCache[sm.AwayTeam],
+			HomeGoals:     &homeGoals,
+			AwayGoals:     &awayGoals,
+			HomeXG:        sm.HomeXG,
+			AwayXG:        sm.AwayXG,
+			Venue:         sm.Venue,
+			Attendance:    sm.Attendance,
+			RefereeID:     refereeCache[sm.RefereeName],
+			MatchReportURL: sm.MatchReportURL,
+			Status:        "completed",
 		}
 
 		if err := s.matchesRepo.Upsert(&match); err != nil {
@@ -83,7 +95,7 @@ func (s *Saver) SaveMatches(matches []ScrapedMatch) error {
 		}
 	}
 
-	s.logger.Info("matches saved successfully", "count", len(matches))
+	logger.Success(s.logger, "matches saved successfully", "count", len(matches))
 
 	return nil
 }
@@ -121,6 +133,50 @@ func (s *Saver) SaveFixtures(fixtures []ScrapedFixture) error {
 	return s.fixtures.BulkCreate(dbFixtures)
 }
 
+func (s *Saver) SaveSquad(squad ScrapedSquad) error {
+	s.logger.Info("saving squad", "team", squad.TeamName, "players", len(squad.Players))
+
+	team, err := s.teamsRepo.FindByName(squad.TeamName)
+	if err != nil {
+		return fmt.Errorf("finding team %q: %w", squad.TeamName, err)
+	}
+
+	for _, sp := range squad.Players {
+		player := &database.Player{
+			Name:        sp.Name,
+			Nationality: sp.Nationality,
+			Position:    sp.Position,
+		}
+
+		if err := s.playersRepo.Upsert(player); err != nil {
+			return fmt.Errorf("upserting player %q: %w", sp.Name, err)
+		}
+
+		member := &database.TeamSquadMember{
+			TeamID:   team.ID,
+			PlayerID: player.ID,
+			Season:   sp.Season,
+			ShirtNum: sp.ShirtNum,
+		}
+
+		if err := s.playersRepo.UpsertSquadMember(member); err != nil {
+			return fmt.Errorf("upserting squad member %q for %q: %w", sp.Name, squad.TeamName, err)
+		}
+	}
+
+	s.logger.Info("squad saved", "team", squad.TeamName, "players", len(squad.Players))
+
+	return nil
+}
+
+func (s *Saver) SaveMatchReport(report ScrapedMatchReport, matchID uint) error {
+	s.logger.Info("saving match report", "match_id", matchID)
+
+	s.logger.Debug("report data not yet implemented", "match_id", matchID, "home", report.HomeTeam, "away", report.AwayTeam)
+
+	return nil
+}
+
 func (s *Saver) resolveTeam(name string, cache map[string]uint) (uint, error) {
 	if id, ok := cache[name]; ok {
 		return id, nil
@@ -155,4 +211,12 @@ func (s *Saver) resolveReferee(name string, cache map[string]*uint) (*uint, erro
 	s.logger.Debug("referee upserted", "name", name, "id", referee.ID)
 
 	return &referee.ID, nil
+}
+
+func (s *Saver) resolvePlayer(name string) (*database.Player, error) {
+	player := &database.Player{Name: name}
+	if err := s.playersRepo.Upsert(player); err != nil {
+		return nil, fmt.Errorf("upserting player %q: %w", name, err)
+	}
+	return player, nil
 }

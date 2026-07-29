@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/edorguez/football-wizard/internal/config"
 	"github.com/edorguez/football-wizard/internal/database"
@@ -15,6 +16,9 @@ import (
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")
 	season := flag.Int("season", 2025, "season year to scrape")
+	full := flag.Bool("full", false, "scrape squads and match reports too")
+	workers := flag.Int("workers", 2, "concurrent scrape workers (max 7)")
+	delay := flag.Int("delay", 2, "rate limit delay in seconds between requests per worker")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
@@ -28,7 +32,7 @@ func main() {
 		Format: cfg.Log.Format,
 	})
 
-	log.Info("starting football-wizard", "season", *season)
+	log.Info("starting football-wizard", "season", *season, "full", *full)
 
 	db, err := database.Connect(cfg.Database.Path)
 	if err != nil {
@@ -46,24 +50,40 @@ func main() {
 	teamsRepo := repository.NewTeamRepository(db)
 	refsRepo := repository.NewRefereeRepository(db)
 	matchesRepo := repository.NewMatchRepository(db)
+	playersRepo := repository.NewPlayerRepository(db)
+	lineupRepo := repository.NewLineupRepository(db)
 	fixturesRepo := repository.NewFixtureRepository(db)
 
 	if cfg.HeadlessX.APIKey == "" {
-		log.Error("headlessx.api_key is required — set it in config.yaml or HEADLESSX_API_KEY env var")
+		log.Error("headlessx.api_key is required")
 		os.Exit(1)
 	}
 
 	client := scraper.NewClient(cfg.HeadlessX.APIURL, cfg.HeadlessX.APIKey, log)
 	defer client.Close()
 
-	saver := scraper.NewSaver(teamsRepo, refsRepo, matchesRepo, fixturesRepo, log)
+	if *workers > 7 {
+		log.Warn("worker count capped to 7", "requested", *workers)
+		*workers = 7
+	}
 
-	sc := scraper.NewScraper(client, saver, log)
+	cache := scraper.NewCache(log)
 
-	if err := sc.ScrapeSeason(*season); err != nil {
+	pool := scraper.NewWorkerPool(client, cache, log, *workers, time.Duration(*delay)*time.Second, 0.5)
+
+	saver := scraper.NewSaver(teamsRepo, refsRepo, matchesRepo, playersRepo, lineupRepo, fixturesRepo, log)
+
+	sc := scraper.NewScraper(client, cache, saver, pool, log)
+
+	if *full {
+		if err := sc.ScrapeSeasonFull(*season); err != nil {
+			log.Error("full scrape failed", "season", *season, "error", err)
+			os.Exit(1)
+		}
+	} else if err := sc.ScrapeSeason(*season); err != nil {
 		log.Error("scraping season", "season", *season, "error", err)
 		os.Exit(1)
 	}
 
-	log.Info("done")
+	logger.Success(log, "done")
 }

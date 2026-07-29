@@ -27,37 +27,22 @@ func NewClient(apiURL, apiKey string, logger *slog.Logger) *Client {
 		apiURL: apiURL,
 		apiKey: apiKey,
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
+			Timeout: 300 * time.Second,
 		},
 		logger: logger,
 	}
 }
 
 func (c *Client) FetchHTML(url string) (string, error) {
-	return c.fetchWithRetry(url, 2)
+	return c.fetch(url, "html")
 }
 
-func (c *Client) fetchWithRetry(url string, attempts int) (string, error) {
-	var lastErr error
-
-	for i := range attempts {
-		if i > 0 {
-			c.logger.Info("retrying fetch", "url", url, "attempt", i+1)
-			time.Sleep(time.Duration(i) * time.Second)
-		}
-
-		html, err := c.fetch(url)
-		if err == nil {
-			return html, nil
-		}
-		lastErr = err
-	}
-
-	return "", fmt.Errorf("fetching after %d attempts: %w", attempts, lastErr)
+func (c *Client) FetchHTMLWithJS(url string) (string, error) {
+	return c.fetch(url, "html-js")
 }
 
-func (c *Client) fetch(url string) (string, error) {
-	c.logger.Info("fetching page via HeadlessX", "url", url)
+func (c *Client) fetch(url, endpoint string) (string, error) {
+	c.logger.Info("fetching page via HeadlessX", "url", url, "endpoint", endpoint)
 
 	body := map[string]string{"url": url}
 	bodyBytes, err := json.Marshal(body)
@@ -67,7 +52,7 @@ func (c *Client) fetch(url string) (string, error) {
 
 	req, err := http.NewRequest(
 		http.MethodPost,
-		fmt.Sprintf("%s/api/operators/website/scrape/html-js", c.apiURL),
+		fmt.Sprintf("%s/api/operators/website/scrape/%s", c.apiURL, endpoint),
 		bytes.NewReader(bodyBytes),
 	)
 	if err != nil {
@@ -93,7 +78,7 @@ func (c *Client) fetch(url string) (string, error) {
 		return "", fmt.Errorf("decoding HeadlessX response: %w", err)
 	}
 
-	c.logger.Info("page fetched via HeadlessX", "url", url, "size", len(hxResp.HTML))
+	c.logger.Info("page fetched", "size", len(hxResp.HTML), "url", url)
 
 	return hxResp.HTML, nil
 }

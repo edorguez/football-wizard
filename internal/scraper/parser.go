@@ -2,6 +2,7 @@ package scraper
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -10,6 +11,8 @@ import (
 )
 
 var errNoMatches = fmt.Errorf("no matches found in HTML")
+
+const fbrefBase = "https://fbref.com"
 
 func tableID(season int) string {
 	return fmt.Sprintf("sched_%d_24_1", season)
@@ -79,15 +82,33 @@ func parseMatchRow(season int, row *goquery.Selection) (ScrapedMatch, bool) {
 		refereeName = strings.TrimSpace(row.Find("td[data-stat='referee']").Text())
 	}
 
+	homeXG := parseNullableFloat(row, "home_xg")
+	awayXG := parseNullableFloat(row, "away_xg")
+
+	venue := strings.TrimSpace(row.Find("td[data-stat='venue']").Text())
+
+	attendance := parseNullableInt(row, "attendance")
+
+	reportHref, _ := row.Find("td[data-stat='score'] a").Attr("href")
+	reportURL := ""
+	if reportHref != "" {
+		reportURL = fbrefBase + reportHref
+	}
+
 	return ScrapedMatch{
-		Season:      season,
-		Round:       round,
-		Date:        date,
-		HomeTeam:    homeTeam,
-		AwayTeam:    awayTeam,
-		HomeGoals:   homeGoals,
-		AwayGoals:   awayGoals,
-		RefereeName: refereeName,
+		Season:         season,
+		Round:          round,
+		Date:           date,
+		HomeTeam:       homeTeam,
+		AwayTeam:       awayTeam,
+		HomeGoals:      homeGoals,
+		AwayGoals:      awayGoals,
+		HomeXG:         homeXG,
+		AwayXG:         awayXG,
+		Venue:          venue,
+		Attendance:     attendance,
+		RefereeName:    refereeName,
+		MatchReportURL: reportURL,
 	}, true
 }
 
@@ -145,6 +166,34 @@ func parseScore(scoreStr string) (int, int, bool) {
 	}
 
 	return home, away, true
+}
+
+func parseNullableFloat(row *goquery.Selection, stat string) *float64 {
+	text := strings.TrimSpace(row.Find(fmt.Sprintf("td[data-stat='%s']", stat)).Text())
+	if text == "" {
+		return nil
+	}
+	n, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return nil
+	}
+	if math.IsNaN(n) || math.IsInf(n, 0) {
+		return nil
+	}
+	return &n
+}
+
+func parseNullableInt(row *goquery.Selection, stat string) *int {
+	text := strings.TrimSpace(row.Find(fmt.Sprintf("td[data-stat='%s']", stat)).Text())
+	if text == "" {
+		return nil
+	}
+	cleaned := strings.ReplaceAll(text, ",", "")
+	n, err := strconv.Atoi(cleaned)
+	if err != nil {
+		return nil
+	}
+	return &n
 }
 
 func ParseFixtures(season int, html string) ([]ScrapedFixture, error) {
