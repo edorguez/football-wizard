@@ -103,8 +103,7 @@ func (wp *WorkerPool) process(job FetchJob) JobResult {
 	}
 
 	if len(job.CacheParts) > 0 {
-		cacheFilename := job.CacheParts[len(job.CacheParts)-1]
-		wp.cache.Write(job.Season, html, cacheFilename)
+		wp.cache.Write(job.Season, html, job.CacheParts...)
 	}
 
 	if err := job.ParseFn(job.Season, html); err != nil {

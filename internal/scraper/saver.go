@@ -10,13 +10,14 @@ import (
 )
 
 type Saver struct {
-	teamsRepo   *repository.TeamRepository
-	refsRepo    *repository.RefereeRepository
-	matchesRepo *repository.MatchRepository
-	playersRepo *repository.PlayerRepository
-	lineupRepo  *repository.LineupRepository
-	fixtures    *repository.FixtureRepository
-	logger      *slog.Logger
+	teamsRepo    *repository.TeamRepository
+	refsRepo     *repository.RefereeRepository
+	matchesRepo  *repository.MatchRepository
+	playersRepo  *repository.PlayerRepository
+	matchStatRepo *repository.MatchStatRepository
+	lineupRepo   *repository.LineupRepository
+	fixtures     *repository.FixtureRepository
+	logger       *slog.Logger
 }
 
 func NewSaver(
@@ -24,18 +25,20 @@ func NewSaver(
 	refsRepo *repository.RefereeRepository,
 	matchesRepo *repository.MatchRepository,
 	playersRepo *repository.PlayerRepository,
+	matchStatRepo *repository.MatchStatRepository,
 	lineupRepo *repository.LineupRepository,
 	fixtures *repository.FixtureRepository,
 	logger *slog.Logger,
 ) *Saver {
 	return &Saver{
-		teamsRepo:   teamsRepo,
-		refsRepo:    refsRepo,
-		matchesRepo: matchesRepo,
-		playersRepo: playersRepo,
-		lineupRepo:  lineupRepo,
-		fixtures:    fixtures,
-		logger:      logger,
+		teamsRepo:    teamsRepo,
+		refsRepo:     refsRepo,
+		matchesRepo:  matchesRepo,
+		playersRepo:  playersRepo,
+		matchStatRepo: matchStatRepo,
+		lineupRepo:   lineupRepo,
+		fixtures:     fixtures,
+		logger:       logger,
 	}
 }
 
@@ -74,20 +77,20 @@ func (s *Saver) SaveMatches(matches []ScrapedMatch) error {
 		awayGoals := sm.AwayGoals
 
 		match := database.Match{
-			Season:        sm.Season,
-			Round:         sm.Round,
-			Date:          sm.Date,
-			HomeTeamID:    teamCache[sm.HomeTeam],
-			AwayTeamID:    teamCache[sm.AwayTeam],
-			HomeGoals:     &homeGoals,
-			AwayGoals:     &awayGoals,
-			HomeXG:        sm.HomeXG,
-			AwayXG:        sm.AwayXG,
-			Venue:         sm.Venue,
-			Attendance:    sm.Attendance,
-			RefereeID:     refereeCache[sm.RefereeName],
+			Season:         sm.Season,
+			Round:          sm.Round,
+			Date:           sm.Date,
+			HomeTeamID:     teamCache[sm.HomeTeam],
+			AwayTeamID:     teamCache[sm.AwayTeam],
+			HomeGoals:      &homeGoals,
+			AwayGoals:      &awayGoals,
+			HomeXG:         sm.HomeXG,
+			AwayXG:         sm.AwayXG,
+			Venue:          sm.Venue,
+			Attendance:     sm.Attendance,
+			RefereeID:      refereeCache[sm.RefereeName],
 			MatchReportURL: sm.MatchReportURL,
-			Status:        "completed",
+			Status:         "completed",
 		}
 
 		if err := s.matchesRepo.Upsert(&match); err != nil {
@@ -172,9 +175,201 @@ func (s *Saver) SaveSquad(squad ScrapedSquad) error {
 func (s *Saver) SaveMatchReport(report ScrapedMatchReport, matchID uint) error {
 	s.logger.Info("saving match report", "match_id", matchID)
 
-	s.logger.Debug("report data not yet implemented", "match_id", matchID, "home", report.HomeTeam, "away", report.AwayTeam)
+	match, err := s.matchesRepo.FindByID(matchID)
+	if err != nil {
+		return fmt.Errorf("finding match %d: %w", matchID, err)
+	}
+
+	if err := s.saveMatchStats(report, match.ID); err != nil {
+		return fmt.Errorf("saving match stats: %w", err)
+	}
+
+	if err := s.saveLineupsAndStats(report, match); err != nil {
+		return fmt.Errorf("saving lineups and player stats: %w", err)
+	}
+
+	if err := s.aggregateDerivedStats(match.ID); err != nil {
+		s.logger.Warn("aggregating derived stats", "match_id", matchID, "error", err)
+	}
+
+	logger.Success(s.logger, "match report saved", "match_id", matchID)
 
 	return nil
+}
+
+func (s *Saver) saveMatchStats(report ScrapedMatchReport, matchID uint) error {
+	stat := &database.MatchStat{
+		MatchID:            matchID,
+		HomePossession:     report.HomePossession,
+		AwayPossession:     report.AwayPossession,
+		HomeShots:          report.HomeShots,
+		AwayShots:          report.AwayShots,
+		HomeShotsOnTarget:  report.HomeShotsOnTarget,
+		AwayShotsOnTarget:  report.AwayShotsOnTarget,
+		HomeShotsOffTarget: report.HomeShotsOffTarget,
+		AwayShotsOffTarget: report.AwayShotsOffTarget,
+		HomeSaves:          report.HomeSaves,
+		AwaySaves:          report.AwaySaves,
+		HomeFouls:          report.HomeFouls,
+		AwayFouls:          report.AwayFouls,
+		HomeCorners:        report.HomeCorners,
+		AwayCorners:        report.AwayCorners,
+		HomeCrosses:        report.HomeCrosses,
+		AwayCrosses:        report.AwayCrosses,
+		HomeOffsides:       report.HomeOffsides,
+		AwayOffsides:       report.AwayOffsides,
+	}
+
+	return s.matchStatRepo.Upsert(stat)
+}
+
+func (s *Saver) saveLineupsAndStats(report ScrapedMatchReport, match *database.Match) error {
+	var allLineups []database.MatchLineup
+	var allStats []database.MatchPlayerStat
+	var allSubs []database.MatchSubstitution
+
+	s.collectTeamData(match.ID, match.HomeTeamID, report.HomeLineup, report.HomePlayerStats, &allLineups, &allStats, true)
+	s.collectTeamData(match.ID, match.AwayTeamID, report.AwayLineup, report.AwayPlayerStats, &allLineups, &allStats, false)
+
+	allSubs = s.deriveSubstitutions(match.ID, match.HomeTeamID, match.AwayTeamID, allLineups, allStats)
+
+	if len(allLineups) > 0 {
+		if err := s.lineupRepo.UpsertLineups(allLineups); err != nil {
+			return fmt.Errorf("saving lineups: %w", err)
+		}
+	}
+	if len(allStats) > 0 {
+		if err := s.lineupRepo.UpsertPlayerStats(allStats); err != nil {
+			return fmt.Errorf("saving player stats: %w", err)
+		}
+	}
+	if len(allSubs) > 0 {
+		if err := s.lineupRepo.UpsertSubstitutions(allSubs); err != nil {
+			return fmt.Errorf("saving substitutions: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (s *Saver) deriveSubstitutions(matchID, homeTeamID, awayTeamID uint, allLineups []database.MatchLineup, allStats []database.MatchPlayerStat) []database.MatchSubstitution {
+	statsByPlayer := map[uint]database.MatchPlayerStat{}
+	for _, st := range allStats {
+		statsByPlayer[st.PlayerID] = st
+	}
+
+	lineupsByTeam := map[uint][]database.MatchLineup{}
+	for _, lu := range allLineups {
+		lineupsByTeam[lu.TeamID] = append(lineupsByTeam[lu.TeamID], lu)
+	}
+
+	var subs []database.MatchSubstitution
+
+	for _, teamID := range []uint{homeTeamID, awayTeamID} {
+		teamLineups := lineupsByTeam[teamID]
+		var subbedOn []uint
+		var subbedOff []uint
+
+		for _, lu := range teamLineups {
+			if !lu.IsStarter && lu.PlayerID != 0 {
+				subbedOn = append(subbedOn, lu.PlayerID)
+				continue
+			}
+			if lu.IsStarter {
+				if st, ok := statsByPlayer[lu.PlayerID]; ok && st.MinutesPlayed != nil && *st.MinutesPlayed < 90 {
+					subbedOff = append(subbedOff, lu.PlayerID)
+				}
+			}
+		}
+
+		count := len(subbedOn)
+		if len(subbedOff) < count {
+			count = len(subbedOff)
+		}
+		for i := range count {
+			subs = append(subs, database.MatchSubstitution{
+				MatchID:    matchID,
+				TeamID:     uint(teamID),
+				PlayerOffID: subbedOff[i],
+				PlayerOnID:  subbedOn[i],
+				Minute:     0,
+			})
+		}
+	}
+
+	return subs
+}
+
+func (s *Saver) collectTeamData(matchID, teamID uint, lineups []ScrapedLineupPlayer, stats map[string]ScrapedPlayerMatchStat, allLineups *[]database.MatchLineup, allStats *[]database.MatchPlayerStat, isHome bool) {
+	seenPlayers := map[string]bool{}
+
+	for _, lp := range lineups {
+		if lp.Name == "" || seenPlayers[lp.Name] {
+			continue
+		}
+		seenPlayers[lp.Name] = true
+
+		if !lp.IsStarter && !lp.HasSubIcon {
+			continue
+		}
+
+		player, err := s.resolvePlayer(lp.Name)
+		if err != nil {
+			s.logger.Error("resolving player for lineup", "name", lp.Name, "error", err)
+			continue
+		}
+
+		*allLineups = append(*allLineups, database.MatchLineup{
+			MatchID:   matchID,
+			TeamID:    teamID,
+			PlayerID:  player.ID,
+			IsStarter: lp.IsStarter,
+			Position:  lp.Position,
+			ShirtNum:  lp.ShirtNum,
+		})
+
+		if ps, ok := stats[lp.Name]; ok {
+			*allStats = append(*allStats, statToDB(matchID, teamID, player.ID, ps))
+		}
+	}
+
+	for name, ps := range stats {
+		if seenPlayers[name] {
+			continue
+		}
+
+		player, err := s.resolvePlayer(name)
+		if err != nil {
+			s.logger.Error("resolving player for stats", "name", name, "error", err)
+			continue
+		}
+
+		*allStats = append(*allStats, statToDB(matchID, teamID, player.ID, ps))
+	}
+}
+
+func statToDB(matchID, teamID, playerID uint, ps ScrapedPlayerMatchStat) database.MatchPlayerStat {
+	minutes := ps.Minutes
+	return database.MatchPlayerStat{
+		MatchID:       matchID,
+		TeamID:        teamID,
+		PlayerID:      playerID,
+		MinutesPlayed: &minutes,
+		Goals:         ps.Goals,
+		Assists:       ps.Assists,
+		Shots:         ps.Shots,
+		ShotsOnTarget: ps.ShotsOnTarget,
+		Passes:        ps.Passes,
+		Tackles:       ps.Tackles,
+		Interceptions: ps.Interceptions,
+		Fouls:         ps.Fouls,
+		Fouled:        ps.Fouled,
+		Offsides:      ps.Offsides,
+		Crosses:       ps.Crosses,
+		YellowCards:   ps.YellowCards,
+		RedCards:      ps.RedCards,
+		Saves:         ps.Saves,
+	}
 }
 
 func (s *Saver) resolveTeam(name string, cache map[string]uint) (uint, error) {
@@ -211,6 +406,25 @@ func (s *Saver) resolveReferee(name string, cache map[string]*uint) (*uint, erro
 	s.logger.Debug("referee upserted", "name", name, "id", referee.ID)
 
 	return &referee.ID, nil
+}
+
+func (s *Saver) aggregateDerivedStats(matchID uint) error {
+	s.logger.Debug("aggregating derived stats", "match_id", matchID)
+
+	err := s.matchesRepo.DB().Exec(`
+		UPDATE match_stats
+		SET home_tackles = (SELECT COALESCE(SUM(tackles), 0) FROM match_player_stats WHERE match_id = ? AND team_id = (SELECT home_team_id FROM matches WHERE id = ?)),
+		    away_tackles = (SELECT COALESCE(SUM(tackles), 0) FROM match_player_stats WHERE match_id = ? AND team_id = (SELECT away_team_id FROM matches WHERE id = ?)),
+		    home_interceptions = (SELECT COALESCE(SUM(interceptions), 0) FROM match_player_stats WHERE match_id = ? AND team_id = (SELECT home_team_id FROM matches WHERE id = ?)),
+		    away_interceptions = (SELECT COALESCE(SUM(interceptions), 0) FROM match_player_stats WHERE match_id = ? AND team_id = (SELECT away_team_id FROM matches WHERE id = ?)),
+		    home_yellow_cards = (SELECT COALESCE(SUM(yellow_cards), 0) FROM match_player_stats WHERE match_id = ? AND team_id = (SELECT home_team_id FROM matches WHERE id = ?)),
+		    away_yellow_cards = (SELECT COALESCE(SUM(yellow_cards), 0) FROM match_player_stats WHERE match_id = ? AND team_id = (SELECT away_team_id FROM matches WHERE id = ?)),
+		    home_red_cards = (SELECT COALESCE(SUM(red_cards), 0) FROM match_player_stats WHERE match_id = ? AND team_id = (SELECT home_team_id FROM matches WHERE id = ?)),
+		    away_red_cards = (SELECT COALESCE(SUM(red_cards), 0) FROM match_player_stats WHERE match_id = ? AND team_id = (SELECT away_team_id FROM matches WHERE id = ?))
+		WHERE match_id = ?
+	`, matchID, matchID, matchID, matchID, matchID, matchID, matchID, matchID, matchID, matchID, matchID, matchID, matchID, matchID, matchID, matchID, matchID).Error
+
+	return err
 }
 
 func (s *Saver) resolvePlayer(name string) (*database.Player, error) {

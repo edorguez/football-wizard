@@ -3,6 +3,7 @@ package repository
 import (
 	"github.com/edorguez/football-wizard/internal/database"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type MatchStatRepository struct {
@@ -13,12 +14,11 @@ func NewMatchStatRepository(db *gorm.DB) *MatchStatRepository {
 	return &MatchStatRepository{db: db}
 }
 
-func (r *MatchStatRepository) Create(stat *database.MatchStat) error {
-	return r.db.Create(stat).Error
-}
-
-func (r *MatchStatRepository) BulkCreate(stats []database.MatchStat) error {
-	return r.db.CreateInBatches(stats, 100).Error
+func (r *MatchStatRepository) Upsert(stat *database.MatchStat) error {
+	return r.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "match_id"}},
+		UpdateAll: true,
+	}).Create(stat).Error
 }
 
 func (r *MatchStatRepository) FindByMatchID(matchID uint) (*database.MatchStat, error) {

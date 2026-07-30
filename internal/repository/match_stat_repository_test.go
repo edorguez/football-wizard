@@ -35,7 +35,8 @@ func TestMatchStatRepository_Create(t *testing.T) {
 		HomeShots: &shots,
 	}
 
-	err := statRepo.Create(stat)
+	err := statRepo.Upsert(stat)
+
 
 	is := assert.New(t)
 
@@ -66,7 +67,7 @@ func TestMatchStatRepository_FindByMatchID(t *testing.T) {
 
 	s := 5
 	stat := &database.MatchStat{MatchID: match.ID, HomeShots: &s}
-	require.NoError(t, statRepo.Create(stat))
+	require.NoError(t, 	statRepo.Upsert(stat))
 
 	found, err := statRepo.FindByMatchID(match.ID)
 

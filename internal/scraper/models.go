@@ -48,26 +48,33 @@ type ScrapedLineupPlayer struct {
 	Position  string
 	ShirtNum  *int
 	IsStarter bool
+	HasSubIcon bool
 }
 
 type ScrapedMatchReport struct {
 	HomeTeam string
 	AwayTeam string
 
-	HomePossession *int
-	AwayPossession *int
-	HomeSaves      *int
-	AwaySaves      *int
-	HomeFouls      *int
-	AwayFouls      *int
-	HomeCrosses    *int
-	AwayCrosses    *int
-	HomeCorners    *int
-	AwayCorners    *int
-	HomeOffsides   *int
-	AwayOffsides   *int
-	HomeTackles    *int
-	AwayTackles    *int
+	HomePossession     *int
+	AwayPossession     *int
+	HomeShots          *int
+	AwayShots          *int
+	HomeShotsOnTarget  *int
+	AwayShotsOnTarget  *int
+	HomeShotsOffTarget *int
+	AwayShotsOffTarget *int
+	HomeSaves          *int
+	AwaySaves          *int
+	HomeFouls          *int
+	AwayFouls          *int
+	HomeCrosses        *int
+	AwayCrosses        *int
+	HomeCorners        *int
+	AwayCorners        *int
+	HomeOffsides       *int
+	AwayOffsides       *int
+	HomeTackles        *int
+	AwayTackles        *int
 
 	HomeLineup []ScrapedLineupPlayer
 	AwayLineup []ScrapedLineupPlayer

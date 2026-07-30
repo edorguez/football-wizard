@@ -19,99 +19,216 @@ func ParseMatchReport(html string) (ScrapedMatchReport, error) {
 		AwayPlayerStats: map[string]ScrapedPlayerMatchStat{},
 	}
 
-	scoreBox := doc.Find(".scorebox")
-	report.HomeTeam = strings.TrimSpace(scoreBox.Find("div[itemprop='performer']").First().Find("a, strong").First().Text())
-	report.AwayTeam = strings.TrimSpace(scoreBox.Find("div[itemprop='performer']").Last().Find("a, strong").First().Text())
+	teamEls := doc.Find(".scorebox_team strong a")
+	if teamEls.Length() >= 2 {
+		report.HomeTeam = strings.TrimSpace(teamEls.First().Text())
+		report.AwayTeam = strings.TrimSpace(teamEls.Last().Text())
+	}
 
 	parseTeamStats(doc, &report)
+	parseLineups(doc, &report)
 	parsePlayerStats(doc, &report)
 
 	return report, nil
 }
 
 func parseTeamStats(doc *goquery.Document, report *ScrapedMatchReport) {
-	doc.Find("div#team_stats_extra div").Each(func(_ int, div *goquery.Selection) {
-		text := strings.TrimSpace(div.Text())
-		if strings.Contains(text, "Fouls") {
-			vals := extractTwoValues(text)
-			if len(vals) == 2 {
-				report.HomeFouls = parseInt(vals[0])
-				report.AwayFouls = parseInt(vals[1])
-			}
-		}
-		if strings.Contains(text, "Corners") {
-			vals := extractTwoValues(text)
-			if len(vals) == 2 {
-				report.HomeCorners = parseInt(vals[0])
-				report.AwayCorners = parseInt(vals[1])
-			}
-		}
-		if strings.Contains(text, "Crosses") {
-			vals := extractTwoValues(text)
-			if len(vals) == 2 {
-				report.HomeCrosses = parseInt(vals[0])
-				report.AwayCrosses = parseInt(vals[1])
-			}
-		}
-		if strings.Contains(text, "Offsides") {
-			vals := extractTwoValues(text)
-			if len(vals) == 2 {
-				report.HomeOffsides = parseInt(vals[0])
-				report.AwayOffsides = parseInt(vals[1])
-			}
-		}
-	})
+	parseExtraStats(doc, report)
+	parseMainStats(doc, report)
+}
 
-	doc.Find("div#team_stats div").Each(func(_ int, div *goquery.Selection) {
-		strong := strings.TrimSpace(div.Find("strong").Text())
-		if strong == "Possession" {
-			vals := extractTwoValues(div.Text())
-			if len(vals) == 2 {
-				report.HomePossession = parseInt(vals[0])
-				report.AwayPossession = parseInt(vals[1])
+func parseMainStats(doc *goquery.Document, report *ScrapedMatchReport) {
+	doc.Find("div#team_stats table tr").Each(func(_ int, row *goquery.Selection) {
+		th := strings.TrimSpace(row.Find("th").Text())
+
+		tds := row.Next().Find("td")
+		if tds.Length() < 2 {
+			return
+		}
+
+		homeText := tds.First().Text()
+		awayText := tds.Last().Text()
+
+		switch th {
+		case "Possession":
+			report.HomePossession = parseStrongPct(tds.First())
+			report.AwayPossession = parseStrongPct(tds.Last())
+
+		case "Shots on Target":
+			hs, hst := parseShotsOnTarget(homeText)
+			as, ast := parseShotsOnTarget(awayText)
+			report.HomeShots = hs
+			report.AwayShots = as
+			report.HomeShotsOnTarget = hst
+			report.AwayShotsOnTarget = ast
+			if hs != nil && hst != nil {
+				off := *hs - *hst
+				report.HomeShotsOffTarget = &off
 			}
+			if as != nil && ast != nil {
+				off := *as - *ast
+				report.AwayShotsOffTarget = &off
+			}
+
+		case "Saves":
+			report.HomeSaves = parseSaves(homeText)
+			report.AwaySaves = parseSaves(awayText)
 		}
 	})
 }
 
-func extractTwoValues(text string) []string {
-	text = strings.ReplaceAll(text, "%", "")
-	parts := strings.Fields(text)
-	var vals []string
+func parseStrongPct(td *goquery.Selection) *int {
+	return extractPct(strings.TrimSpace(td.Find("strong").First().Text()))
+}
+
+func parseShotsOnTarget(text string) (totalShots, shotsOnTarget *int) {
+	text = strings.TrimSpace(text)
+	parts := strings.SplitN(text, "—", 2)
+	var shotPart string
 	for _, p := range parts {
-		if isNumeric(p) {
-			vals = append(vals, p)
+		if strings.Contains(p, " of ") {
+			shotPart = p
+			break
 		}
 	}
-	if len(vals) >= 2 {
-		return vals[:2]
+	if shotPart == "" {
+		return nil, nil
+	}
+	idx := strings.Index(shotPart, " of ")
+	onTarget := parseInt(strings.TrimSpace(shotPart[:idx]))
+	rest := strings.TrimSpace(shotPart[idx+4:])
+	space := strings.Index(rest, " ")
+	if space > 0 {
+		rest = rest[:space]
+	}
+	total := parseInt(rest)
+	if onTarget == nil || total == nil {
+		return nil, nil
+	}
+	return total, onTarget
+}
+
+func parseSaves(text string) *int {
+	text = strings.TrimSpace(text)
+	parts := strings.SplitN(text, "—", 2)
+	for _, p := range parts {
+		idx := strings.Index(p, " of ")
+		if idx >= 0 {
+			return parseInt(strings.TrimSpace(p[:idx]))
+		}
 	}
 	return nil
 }
 
-func isNumeric(s string) bool {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return false
-	}
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return false
+func parseExtraStats(doc *goquery.Document, report *ScrapedMatchReport) {
+	doc.Find("div#team_stats_extra > div").Each(func(_ int, container *goquery.Selection) {
+		var vals []string
+		container.ChildrenFiltered("div").Each(func(_ int, d *goquery.Selection) {
+			if d.HasClass("th") {
+				return
+			}
+			vals = append(vals, strings.TrimSpace(d.Text()))
+		})
+
+		for i := 0; i+2 < len(vals); i += 3 {
+			stat := vals[i+1]
+			switch stat {
+			case "Fouls":
+				report.HomeFouls = parseInt(vals[i])
+				report.AwayFouls = parseInt(vals[i+2])
+			case "Corners":
+				report.HomeCorners = parseInt(vals[i])
+				report.AwayCorners = parseInt(vals[i+2])
+			case "Crosses":
+				report.HomeCrosses = parseInt(vals[i])
+				report.AwayCrosses = parseInt(vals[i+2])
+			case "Offsides":
+				report.HomeOffsides = parseInt(vals[i])
+				report.AwayOffsides = parseInt(vals[i+2])
+			}
 		}
+	})
+}
+
+func parseLineups(doc *goquery.Document, report *ScrapedMatchReport) {
+	lineupTables := doc.Find("div.lineup table")
+	if lineupTables.Length() < 2 {
+		return
 	}
-	return true
+
+	report.HomeLineup = parseLineupTable(lineupTables.First())
+	report.AwayLineup = parseLineupTable(lineupTables.Last())
+}
+
+func parseLineupTable(table *goquery.Selection) []ScrapedLineupPlayer {
+	var lineups []ScrapedLineupPlayer
+	isStarter := true
+
+	table.Find("tbody tr").Each(func(_ int, row *goquery.Selection) {
+		th := row.Find("th")
+		if th.Length() > 0 {
+			if strings.Contains(th.Text(), "Bench") {
+				isStarter = false
+			}
+			return
+		}
+
+		name := strings.TrimSpace(row.Find("td a").Text())
+		if name == "" {
+			return
+		}
+
+		var shirtNum *int
+		if n := parseInt(strings.TrimSpace(row.Find("td").First().Text())); n != nil {
+			shirtNum = n
+		}
+
+		hasSub := row.Find("div.event_icon.substitute_in").Length() > 0
+
+		lineups = append(lineups, ScrapedLineupPlayer{
+			Name:       name,
+			ShirtNum:   shirtNum,
+			IsStarter:  isStarter,
+			HasSubIcon: hasSub,
+		})
+	})
+
+	return lineups
+}
+
+func extractPct(s string) *int {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "%", ""))
+	if s == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return nil
+	}
+	return &n
 }
 
 func parsePlayerStats(doc *goquery.Document, report *ScrapedMatchReport) {
-	doc.Find("table[id^='stats_']").Each(func(_ int, table *goquery.Selection) {
+	doc.Find("table[id^='stats_'], table[id^='keeper_stats_']").Each(func(_ int, table *goquery.Selection) {
 		tableID, hasID := table.Attr("id")
 		if !hasID {
 			return
 		}
 
 		isSummary := strings.HasSuffix(tableID, "_summary")
-		isKeeper := strings.HasSuffix(tableID, "_keeper")
+		isKeeper := strings.HasPrefix(tableID, "keeper_stats_")
 		if !isSummary && !isKeeper {
+			return
+		}
+
+		caption := strings.TrimSpace(table.Find("caption").Text())
+
+		isHome := report.HomeTeam != "" && caption != "" &&
+			(strings.Contains(caption, report.HomeTeam) || strings.Contains(report.HomeTeam, caption))
+		isAway := !isHome && report.AwayTeam != "" && caption != "" &&
+			(strings.Contains(caption, report.AwayTeam) || strings.Contains(report.AwayTeam, caption))
+
+		if !isHome && !isAway {
 			return
 		}
 
@@ -120,58 +237,55 @@ func parsePlayerStats(doc *goquery.Document, report *ScrapedMatchReport) {
 				return
 			}
 
-			stat := parsePlayerStatRow(row, table)
+			stat := parsePlayerStatRow(row, tableID)
 			if stat.Name == "" {
 				return
 			}
 
-			if report.HomeTeam != "" && strings.Contains(tableID, "_") {
-				if len(report.HomeLineup) == 0 {
-					report.HomePlayerStats[stat.Name] = stat
-				} else {
-					isHome := false
-					for _, lp := range report.HomeLineup {
-						if lp.Name == stat.Name {
-							isHome = true
-							break
-						}
-					}
-					if isHome {
-						report.HomePlayerStats[stat.Name] = stat
-					} else {
-						report.AwayPlayerStats[stat.Name] = stat
-					}
-				}
+			if isHome {
+				report.HomePlayerStats[stat.Name] = stat
+			} else {
+				report.AwayPlayerStats[stat.Name] = stat
 			}
 		})
 	})
 }
 
-func parsePlayerStatRow(row *goquery.Selection, table *goquery.Selection) ScrapedPlayerMatchStat {
+func parsePlayerStatRow(row *goquery.Selection, tableID string) ScrapedPlayerMatchStat {
 	name := strings.TrimSpace(row.Find("th[data-stat='player'] a").First().Text())
 	if name == "" {
 		return ScrapedPlayerMatchStat{}
 	}
 
-	return ScrapedPlayerMatchStat{
+	isKeeper := strings.HasPrefix(tableID, "keeper_stats_")
+
+	stat := ScrapedPlayerMatchStat{
 		Name:     name,
 		Position: strings.TrimSpace(row.Find("td[data-stat='position']").Text()),
 		Minutes:  mustParseInt(row.Find("td[data-stat='minutes']").Text()),
-		Goals:    parseIntFromRow(row, "goals"),
-		Assists:  parseIntFromRow(row, "assists"),
-		Shots:    parseIntFromRow(row, "shots"),
-		ShotsOnTarget: parseIntFromRow(row, "shots_on_target"),
-		Fouls:    parseIntFromRow(row, "fouls"),
-		Fouled:   parseIntFromRow(row, "fouled"),
-		Offsides: parseIntFromRow(row, "offsides"),
-		Crosses:  parseIntFromRow(row, "crosses"),
-		YellowCards: parseIntFromRow(row, "cards_yellow"),
-		RedCards:  parseIntFromRow(row, "cards_red"),
-		Saves:    parseIntFromRow(row, "saves"),
-		Tackles:  parseIntFromRow(row, "tackles"),
-		Interceptions: parseIntFromRow(row, "interceptions"),
-		Passes:   parseIntFromRow(row, "passes"),
 	}
+
+	if isKeeper {
+		stat.Saves = parseIntFromRow(row, "gk_saves")
+		stat.Goals = parseIntFromRow(row, "gk_goals_against")
+		stat.ShotsOnTarget = parseIntFromRow(row, "gk_shots_on_target_against")
+	} else {
+		stat.Goals = parseIntFromRow(row, "goals")
+		stat.Assists = parseIntFromRow(row, "assists")
+		stat.Shots = parseIntFromRow(row, "shots")
+		stat.ShotsOnTarget = parseIntFromRow(row, "shots_on_target")
+		stat.Fouls = parseIntFromRow(row, "fouls")
+		stat.Fouled = parseIntFromRow(row, "fouled")
+		stat.Offsides = parseIntFromRow(row, "offsides")
+		stat.Crosses = parseIntFromRow(row, "crosses")
+		stat.YellowCards = parseIntFromRow(row, "cards_yellow")
+		stat.RedCards = parseIntFromRow(row, "cards_red")
+		stat.Tackles = parseIntFromRow(row, "tackles")
+		stat.Interceptions = parseIntFromRow(row, "interceptions")
+		stat.Passes = parseIntFromRow(row, "passes")
+	}
+
+	return stat
 }
 
 func parseIntFromRow(row *goquery.Selection, stat string) *int {

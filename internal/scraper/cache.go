@@ -33,8 +33,8 @@ func (c *Cache) Read(season int, parts ...string) (string, bool) {
 	return string(data), true
 }
 
-func (c *Cache) Write(season int, data, filename string) {
-	path := cachePath(season, filename)
+func (c *Cache) Write(season int, data string, parts ...string) {
+	path := cachePath(season, parts...)
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		c.logger.Error("creating cache directory", "path", dir, "error", err)

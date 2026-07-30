@@ -44,6 +44,24 @@ func (r *MatchRepository) ListBySeason(season int) ([]database.Match, error) {
 	return matches, err
 }
 
+func (r *MatchRepository) DB() *gorm.DB {
+	return r.db
+}
+
+func (r *MatchRepository) FindBySeasonRoundTeams(season, round int, homeTeam, awayTeam string) (*database.Match, error) {
+	var match database.Match
+	err := r.db.
+		Joins("JOIN teams AS ht ON ht.id = matches.home_team_id").
+		Joins("JOIN teams AS at ON at.id = matches.away_team_id").
+		Where("matches.season = ? AND matches.round = ? AND ht.name = ? AND at.name = ?", season, round, homeTeam, awayTeam).
+		Preload("HomeTeam").Preload("AwayTeam").
+		First(&match).Error
+	if err != nil {
+		return nil, err
+	}
+	return &match, nil
+}
+
 func (r *MatchRepository) ListByTeam(teamID uint) ([]database.Match, error) {
 	var matches []database.Match
 	err := r.db.Where("home_team_id = ? OR away_team_id = ?", teamID, teamID).

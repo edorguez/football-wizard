@@ -51,6 +51,7 @@ func main() {
 	refsRepo := repository.NewRefereeRepository(db)
 	matchesRepo := repository.NewMatchRepository(db)
 	playersRepo := repository.NewPlayerRepository(db)
+	matchStatRepo := repository.NewMatchStatRepository(db)
 	lineupRepo := repository.NewLineupRepository(db)
 	fixturesRepo := repository.NewFixtureRepository(db)
 
@@ -71,9 +72,9 @@ func main() {
 
 	pool := scraper.NewWorkerPool(client, cache, log, *workers, time.Duration(*delay)*time.Second, 0.5)
 
-	saver := scraper.NewSaver(teamsRepo, refsRepo, matchesRepo, playersRepo, lineupRepo, fixturesRepo, log)
+	saver := scraper.NewSaver(teamsRepo, refsRepo, matchesRepo, playersRepo, matchStatRepo, lineupRepo, fixturesRepo, log)
 
-	sc := scraper.NewScraper(client, cache, saver, pool, log)
+	sc := scraper.NewScraper(client, cache, saver, pool, matchesRepo, log)
 
 	if *full {
 		if err := sc.ScrapeSeasonFull(*season); err != nil {

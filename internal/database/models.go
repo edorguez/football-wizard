@@ -135,11 +135,11 @@ type MatchPlayerStat struct {
 
 type MatchSubstitution struct {
 	ID         uint   `gorm:"primaryKey" json:"id"`
-	MatchID    uint   `gorm:"index;not null" json:"match_id"`
-	TeamID     uint   `gorm:"not null" json:"team_id"`
+	MatchID    uint   `gorm:"uniqueIndex:idx_subs;not null" json:"match_id"`
+	TeamID     uint   `gorm:"uniqueIndex:idx_subs;not null" json:"team_id"`
 	PlayerOffID uint  `gorm:"not null" json:"player_off_id"`
-	PlayerOnID uint   `gorm:"not null" json:"player_on_id"`
-	Minute     int    `json:"minute"`
+	PlayerOnID uint   `gorm:"uniqueIndex:idx_subs;not null" json:"player_on_id"`
+	Minute     int    `gorm:"uniqueIndex:idx_subs;not null" json:"minute"`
 	PlayerOff  Player `gorm:"foreignKey:PlayerOffID" json:"-"`
 	PlayerOn   Player `gorm:"foreignKey:PlayerOnID" json:"-"`
 	Match      Match  `gorm:"foreignKey:MatchID" json:"-"`

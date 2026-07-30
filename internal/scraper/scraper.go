@@ -5,23 +5,26 @@ import (
 	"log/slog"
 
 	"github.com/edorguez/football-wizard/internal/logger"
+	"github.com/edorguez/football-wizard/internal/repository"
 )
 
 type Scraper struct {
-	client   *Client
-	cache    *Cache
-	saver    *Saver
-	pool     *WorkerPool
-	logger   *slog.Logger
+	client      *Client
+	cache       *Cache
+	saver       *Saver
+	pool        *WorkerPool
+	matchesRepo *repository.MatchRepository
+	logger      *slog.Logger
 }
 
-func NewScraper(client *Client, cache *Cache, saver *Saver, pool *WorkerPool, logger *slog.Logger) *Scraper {
+func NewScraper(client *Client, cache *Cache, saver *Saver, pool *WorkerPool, matchesRepo *repository.MatchRepository, logger *slog.Logger) *Scraper {
 	return &Scraper{
-		client: client,
-		cache:  cache,
-		saver:  saver,
-		pool:   pool,
-		logger: logger,
+		client:      client,
+		cache:       cache,
+		saver:       saver,
+		pool:        pool,
+		matchesRepo: matchesRepo,
+		logger:      logger,
 	}
 }
 
@@ -82,6 +85,7 @@ func (s *Scraper) fetchSchedule(season int) (string, error) {
 	}
 
 	s.cache.Write(season, html, "schedule.html")
+	s.logger.Info("cached schedule", "season", season, "size", len(html))
 
 	return html, nil
 }
@@ -151,23 +155,33 @@ func (s *Scraper) ScrapeMatchReports(season int) error {
 		return fmt.Errorf("fetching schedule for match reports: %w", err)
 	}
 
-	matches, err := ParseMatchResults(season, html)
+	scrapedMatches, err := ParseMatchResults(season, html)
 	if err != nil {
 		return fmt.Errorf("parsing schedule: %w", err)
 	}
 
 	var jobs []FetchJob
-	for _, m := range matches {
-		if m.MatchReportURL == "" {
+	for _, sm := range scrapedMatches {
+		if sm.MatchReportURL == "" {
 			continue
 		}
+
+		match, err := s.matchesRepo.FindBySeasonRoundTeams(season, sm.Round, sm.HomeTeam, sm.AwayTeam)
+		if err != nil {
+			s.logger.Warn("match not found in DB, skipping report", "home", sm.HomeTeam, "away", sm.AwayTeam, "round", sm.Round)
+			continue
+		}
+
+		matchID := match.ID
 		jobs = append(jobs, FetchJob{
-			Label:      fmt.Sprintf("%s-vs-%s", m.HomeTeam, m.AwayTeam),
-			URL:        m.MatchReportURL,
+			Label:      fmt.Sprintf("%s-vs-%s", sm.HomeTeam, sm.AwayTeam),
+			URL:        sm.MatchReportURL,
 			Season:     season,
 			RequiresJS: false,
-			CacheParts: []string{"reports", fmt.Sprintf("%s-vs-%s.html", m.HomeTeam, m.AwayTeam)},
-			ParseFn:    s.parseAndSaveReport,
+			CacheParts: []string{"reports", fmt.Sprintf("%s-vs-%s.html", sm.HomeTeam, sm.AwayTeam)},
+			ParseFn: func(_ int, html string) error {
+				return s.parseAndSaveReport(html, matchID, sm.HomeTeam, sm.AwayTeam)
+			},
 		})
 	}
 
@@ -192,11 +206,16 @@ func (s *Scraper) ScrapeMatchReports(season int) error {
 	return nil
 }
 
-func (s *Scraper) parseAndSaveReport(_ int, html string) error {
-	_, err := ParseMatchReport(html)
+func (s *Scraper) parseAndSaveReport(html string, matchID uint, homeTeam, awayTeam string) error {
+	report, err := ParseMatchReport(html)
 	if err != nil {
 		return fmt.Errorf("parsing match report: %w", err)
 	}
 
-	return nil
+	if report.HomeTeam == "" && report.AwayTeam == "" {
+		s.logger.Warn("empty match report, skipping", "home", homeTeam, "away", awayTeam)
+		return nil
+	}
+
+	return s.saver.SaveMatchReport(report, matchID)
 }
