@@ -10,14 +10,14 @@ import (
 )
 
 type Saver struct {
-	teamsRepo    *repository.TeamRepository
-	refsRepo     *repository.RefereeRepository
-	matchesRepo  *repository.MatchRepository
-	playersRepo  *repository.PlayerRepository
+	teamsRepo     *repository.TeamRepository
+	refsRepo      *repository.RefereeRepository
+	matchesRepo   *repository.MatchRepository
+	playersRepo   *repository.PlayerRepository
 	matchStatRepo *repository.MatchStatRepository
-	lineupRepo   *repository.LineupRepository
-	fixtures     *repository.FixtureRepository
-	logger       *slog.Logger
+	lineupRepo    *repository.LineupRepository
+	fixtures      *repository.FixtureRepository
+	logger        *slog.Logger
 }
 
 func NewSaver(
@@ -31,14 +31,14 @@ func NewSaver(
 	logger *slog.Logger,
 ) *Saver {
 	return &Saver{
-		teamsRepo:    teamsRepo,
-		refsRepo:     refsRepo,
-		matchesRepo:  matchesRepo,
-		playersRepo:  playersRepo,
+		teamsRepo:     teamsRepo,
+		refsRepo:      refsRepo,
+		matchesRepo:   matchesRepo,
+		playersRepo:   playersRepo,
 		matchStatRepo: matchStatRepo,
-		lineupRepo:   lineupRepo,
-		fixtures:     fixtures,
-		logger:       logger,
+		lineupRepo:    lineupRepo,
+		fixtures:      fixtures,
+		logger:        logger,
 	}
 }
 
@@ -199,25 +199,33 @@ func (s *Saver) SaveMatchReport(report ScrapedMatchReport, matchID uint) error {
 
 func (s *Saver) saveMatchStats(report ScrapedMatchReport, matchID uint) error {
 	stat := &database.MatchStat{
-		MatchID:            matchID,
-		HomePossession:     report.HomePossession,
-		AwayPossession:     report.AwayPossession,
-		HomeShots:          report.HomeShots,
-		AwayShots:          report.AwayShots,
-		HomeShotsOnTarget:  report.HomeShotsOnTarget,
-		AwayShotsOnTarget:  report.AwayShotsOnTarget,
-		HomeShotsOffTarget: report.HomeShotsOffTarget,
-		AwayShotsOffTarget: report.AwayShotsOffTarget,
-		HomeSaves:          report.HomeSaves,
-		AwaySaves:          report.AwaySaves,
-		HomeFouls:          report.HomeFouls,
-		AwayFouls:          report.AwayFouls,
-		HomeCorners:        report.HomeCorners,
-		AwayCorners:        report.AwayCorners,
-		HomeCrosses:        report.HomeCrosses,
-		AwayCrosses:        report.AwayCrosses,
-		HomeOffsides:       report.HomeOffsides,
-		AwayOffsides:       report.AwayOffsides,
+		MatchID:              matchID,
+		HomePossession:       report.HomePossession,
+		AwayPossession:       report.AwayPossession,
+		HomeShots:            report.HomeShots,
+		AwayShots:            report.AwayShots,
+		HomeShotsOnTarget:    report.HomeShotsOnTarget,
+		AwayShotsOnTarget:    report.AwayShotsOnTarget,
+		HomeShotsOffTarget:   report.HomeShotsOffTarget,
+		AwayShotsOffTarget:   report.AwayShotsOffTarget,
+		HomeSaves:            report.HomeSaves,
+		AwaySaves:            report.AwaySaves,
+		HomeFouls:            report.HomeFouls,
+		AwayFouls:            report.AwayFouls,
+		HomeCorners:          report.HomeCorners,
+		AwayCorners:          report.AwayCorners,
+		HomeCrosses:          report.HomeCrosses,
+		AwayCrosses:          report.AwayCrosses,
+		HomeOffsides:         report.HomeOffsides,
+		AwayOffsides:         report.AwayOffsides,
+		HomeGoalsFirstHalf:   report.HomeGoalsFirstHalf,
+		AwayGoalsFirstHalf:   report.AwayGoalsFirstHalf,
+		HomeGoalsSecondHalf:  report.HomeGoalsSecondHalf,
+		AwayGoalsSecondHalf:  report.AwayGoalsSecondHalf,
+		HomeFirstGoalMinute:  report.HomeFirstGoalMinute,
+		AwayFirstGoalMinute:  report.AwayFirstGoalMinute,
+		HomeSecondGoalMinute: report.HomeSecondGoalMinute,
+		AwaySecondGoalMinute: report.AwaySecondGoalMinute,
 	}
 
 	return s.matchStatRepo.Upsert(stat)
@@ -288,11 +296,11 @@ func (s *Saver) deriveSubstitutions(matchID, homeTeamID, awayTeamID uint, allLin
 		}
 		for i := range count {
 			subs = append(subs, database.MatchSubstitution{
-				MatchID:    matchID,
-				TeamID:     uint(teamID),
+				MatchID:     matchID,
+				TeamID:      uint(teamID),
 				PlayerOffID: subbedOff[i],
 				PlayerOnID:  subbedOn[i],
-				Minute:     0,
+				Minute:      0,
 			})
 		}
 	}

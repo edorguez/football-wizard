@@ -3,6 +3,7 @@ package scraper
 import (
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/edorguez/football-wizard/internal/logger"
 	"github.com/edorguez/football-wizard/internal/repository"
@@ -118,7 +119,8 @@ func (s *Scraper) ScrapeSquads(season int) error {
 		})
 	}
 
-	results := s.pool.Run(jobs)
+	start := time.Now()
+	results := s.pool.Run("squads", jobs)
 
 	var errCount int
 	for _, r := range results {
@@ -128,7 +130,7 @@ func (s *Scraper) ScrapeSquads(season int) error {
 		}
 	}
 
-	logger.Success(s.logger, "squad scraping complete", "total", len(jobs), "errors", errCount)
+	logger.Success(s.logger, "squad scraping complete", "total", len(jobs), "errors", errCount, "elapsed", time.Since(start).Round(time.Second))
 
 	if errCount > 0 {
 		return fmt.Errorf("%d squad(s) failed to scrape", errCount)
@@ -187,7 +189,8 @@ func (s *Scraper) ScrapeMatchReports(season int) error {
 
 	s.logger.Info("match reports to scrape", "count", len(jobs))
 
-	results := s.pool.Run(jobs)
+	start := time.Now()
+	results := s.pool.Run("match reports", jobs)
 
 	var errCount int
 	for _, r := range results {
@@ -197,7 +200,7 @@ func (s *Scraper) ScrapeMatchReports(season int) error {
 		}
 	}
 
-	logger.Success(s.logger, "match report scraping complete", "total", len(jobs), "errors", errCount)
+	logger.Success(s.logger, "match report scraping complete", "total", len(jobs), "errors", errCount, "elapsed", time.Since(start).Round(time.Second))
 
 	if errCount > 0 {
 		return fmt.Errorf("%d match report(s) failed to scrape", errCount)

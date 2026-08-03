@@ -9,12 +9,12 @@ type ScrapedMatch struct {
 	HomeTeam string
 	AwayTeam string
 
-	HomeGoals   int
-	AwayGoals   int
-	HomeXG      *float64
-	AwayXG      *float64
-	Venue       string
-	Attendance  *int
+	HomeGoals  int
+	AwayGoals  int
+	HomeXG     *float64
+	AwayXG     *float64
+	Venue      string
+	Attendance *int
 
 	RefereeName string
 
@@ -44,10 +44,10 @@ type ScrapedSquad struct {
 }
 
 type ScrapedLineupPlayer struct {
-	Name      string
-	Position  string
-	ShirtNum  *int
-	IsStarter bool
+	Name       string
+	Position   string
+	ShirtNum   *int
+	IsStarter  bool
 	HasSubIcon bool
 }
 
@@ -76,6 +76,15 @@ type ScrapedMatchReport struct {
 	HomeTackles        *int
 	AwayTackles        *int
 
+	HomeGoalsFirstHalf   *int
+	AwayGoalsFirstHalf   *int
+	HomeGoalsSecondHalf  *int
+	AwayGoalsSecondHalf  *int
+	HomeFirstGoalMinute  *int
+	AwayFirstGoalMinute  *int
+	HomeSecondGoalMinute *int
+	AwaySecondGoalMinute *int
+
 	HomeLineup []ScrapedLineupPlayer
 	AwayLineup []ScrapedLineupPlayer
 
@@ -86,24 +95,24 @@ type ScrapedMatchReport struct {
 }
 
 type ScrapedPlayerMatchStat struct {
-	Name         string
-	Position     string
-	Minutes      int
-	Goals        *int
-	Assists      *int
-	Shots        *int
+	Name          string
+	Position      string
+	Minutes       int
+	Goals         *int
+	Assists       *int
+	Shots         *int
 	ShotsOnTarget *int
-	Passes       *int
-	PassAccuracy *float64
-	Tackles      *int
+	Passes        *int
+	PassAccuracy  *float64
+	Tackles       *int
 	Interceptions *int
-	Fouls        *int
-	Fouled       *int
-	Offsides     *int
-	Crosses      *int
-	YellowCards  *int
-	RedCards     *int
-	Saves        *int
+	Fouls         *int
+	Fouled        *int
+	Offsides      *int
+	Crosses       *int
+	YellowCards   *int
+	RedCards      *int
+	Saves         *int
 }
 
 type ScrapedSubstitution struct {

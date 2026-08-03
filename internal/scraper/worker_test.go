@@ -1,10 +1,13 @@
 package scraper
 
 import (
+	"log/slog"
 	"testing"
 	"time"
 
+	"github.com/edorguez/football-wizard/internal/logger"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewWorkerPool_ClampsMinWorkers(t *testing.T) {
@@ -27,6 +30,29 @@ func TestNewWorkerPool_DefaultDelay(t *testing.T) {
 	is.Equal(5, pool.workers)
 	is.Equal(2*time.Second, pool.rateLimitDelay)
 	is.Equal(0.5, pool.jitter)
+}
+
+func TestWorkerProgressLogging(t *testing.T) {
+	t.Parallel()
+
+	buf := logger.NewRingBuffer(100)
+	pool := NewWorkerPool(nil, nil, slog.New(slog.NewTextHandler(buf, nil)), 1, 0, 0)
+
+	// Before the first step boundary no progress is logged.
+	pool.logProgress("match reports", 5, 380)
+	assert.Empty(t, buf.Lines())
+
+	// Every 10 completed items produces one progress line.
+	pool.logProgress("match reports", 10, 380)
+	lines := buf.Lines()
+	require.Len(t, lines, 1)
+	assert.Contains(t, lines[0], "match reports")
+	assert.Contains(t, lines[0], "completed=10")
+	assert.Contains(t, lines[0], "total=380")
+
+	// Zero total never logs.
+	pool.logProgress("squads", 10, 0)
+	require.Len(t, buf.Lines(), 1)
 }
 
 func TestThrottle_NoDelay(t *testing.T) {

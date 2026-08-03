@@ -13,3 +13,16 @@ log:
 headlessx:
   api_url: http://localhost:38473
   api_key: ""
+
+model:
+  goal_lines: [0.5, 1.5, 2.5, 3.5, 4.5]
+  over_under:
+    cards: 3.5
+    corners: 9.5
+    offsides: 3.5
+    shots: 24.5
+    shots_on_target: 7.5
+    saves: 5.5
+  epochs: 2000
+  learn_rate: 0.05
+  l2: 0.01

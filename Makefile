@@ -18,11 +18,12 @@ run: build
 	./$(BINARY) $(ARGS)
 
 # Build and run via go run (faster for development)
-#   make dev
-#   make dev ARGS="--season 2025"
+#   make dev                          # launch the TUI
+#   make dev ARGS="daemon"            # headless scheduler
+#   make dev ARGS="--season 2025"     # scrape a season
 #   make dev ARGS="--season 2025 --full"
 #   make dev ARGS="--season 2025 --full --workers 5"
-#   make dev ARGS="--season 2025 --full --workers 7 --delay 1"
+#   make dev ARGS="--train"
 dev:
 	@mkdir -p data
 	go run ./cmd/football-wizard $(ARGS)

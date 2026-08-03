@@ -2,6 +2,7 @@ package repository
 
 import (
 	"github.com/edorguez/football-wizard/internal/database"
+	"github.com/edorguez/football-wizard/internal/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -62,6 +63,16 @@ func (r *MatchRepository) FindBySeasonRoundTeams(season, round int, homeTeam, aw
 	return &match, nil
 }
 
+func (r *MatchRepository) ListByReferee(refereeID uint) ([]database.Match, error) {
+	var matches []database.Match
+	err := r.db.Where("referee_id = ?", refereeID).
+		Preload("HomeTeam").
+		Preload("AwayTeam").
+		Order("date ASC").
+		Find(&matches).Error
+	return matches, err
+}
+
 func (r *MatchRepository) ListByTeam(teamID uint) ([]database.Match, error) {
 	var matches []database.Match
 	err := r.db.Where("home_team_id = ? OR away_team_id = ?", teamID, teamID).
@@ -71,4 +82,67 @@ func (r *MatchRepository) ListByTeam(teamID uint) ([]database.Match, error) {
 		Limit(10).
 		Find(&matches).Error
 	return matches, err
+}
+
+// ListRows returns all completed matches paired with their aggregated stats,
+// shaped for the prediction models.
+func (r *MatchRepository) ListRows() ([]model.MatchRow, error) {
+	var matches []database.Match
+	if err := r.db.Where("status = ?", "completed").Order("date ASC").Find(&matches).Error; err != nil {
+		return nil, err
+	}
+
+	var stats []database.MatchStat
+	if err := r.db.Find(&stats).Error; err != nil {
+		return nil, err
+	}
+
+	statsByMatch := map[uint]database.MatchStat{}
+	for _, s := range stats {
+		statsByMatch[s.MatchID] = s
+	}
+
+	rows := make([]model.MatchRow, 0, len(matches))
+	for _, m := range matches {
+		row := model.MatchRow{
+			ID:         m.ID,
+			Season:     m.Season,
+			Round:      m.Round,
+			Date:       m.Date,
+			HomeTeamID: m.HomeTeamID,
+			AwayTeamID: m.AwayTeamID,
+			HomeGoals:  m.HomeGoals,
+			AwayGoals:  m.AwayGoals,
+			HomeXG:     m.HomeXG,
+			AwayXG:     m.AwayXG,
+		}
+
+		if s, ok := statsByMatch[m.ID]; ok {
+			row.HomeCorners = s.HomeCorners
+			row.AwayCorners = s.AwayCorners
+			row.HomeOffsides = s.HomeOffsides
+			row.AwayOffsides = s.AwayOffsides
+			row.HomeYellowCards = s.HomeYellowCards
+			row.AwayYellowCards = s.AwayYellowCards
+			row.HomeRedCards = s.HomeRedCards
+			row.AwayRedCards = s.AwayRedCards
+			row.HomeShots = s.HomeShots
+			row.AwayShots = s.AwayShots
+			row.HomeShotsOnTarget = s.HomeShotsOnTarget
+			row.AwayShotsOnTarget = s.AwayShotsOnTarget
+			row.HomeSaves = s.HomeSaves
+			row.AwaySaves = s.AwaySaves
+			row.HomeGoalsFirstHalf = s.HomeGoalsFirstHalf
+			row.AwayGoalsFirstHalf = s.AwayGoalsFirstHalf
+			row.HomeGoalsSecondHalf = s.HomeGoalsSecondHalf
+			row.AwayGoalsSecondHalf = s.AwayGoalsSecondHalf
+			row.HomeFirstGoalMinute = s.HomeFirstGoalMinute
+			row.AwayFirstGoalMinute = s.AwayFirstGoalMinute
+			row.HomeSecondGoalMinute = s.HomeSecondGoalMinute
+			row.AwaySecondGoalMinute = s.AwaySecondGoalMinute
+		}
+
+		rows = append(rows, row)
+	}
+	return rows, nil
 }

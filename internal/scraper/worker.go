@@ -5,8 +5,11 @@ import (
 	"log/slog"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 )
+
+const progressStep = 10
 
 type JobResult struct {
 	Label string
@@ -45,7 +48,13 @@ type FetchJob struct {
 	ParseFn    func(season int, html string) error
 }
 
-func (wp *WorkerPool) Run(jobs []FetchJob) []JobResult {
+// Run processes all jobs across the worker pool, logging throttled progress so
+// long-running phases show what is happening. label names the phase (e.g.
+// "squads" or "match reports") for the progress lines.
+func (wp *WorkerPool) Run(label string, jobs []FetchJob) []JobResult {
+	total := len(jobs)
+	var completed atomic.Int64
+
 	var wg sync.WaitGroup
 	jobCh := make(chan FetchJob, len(jobs))
 	resultCh := make(chan JobResult, len(jobs))
@@ -57,6 +66,7 @@ func (wp *WorkerPool) Run(jobs []FetchJob) []JobResult {
 			for job := range jobCh {
 				result := wp.process(job)
 				resultCh <- result
+				wp.logProgress(label, int(completed.Add(1)), total)
 			}
 		}()
 	}
@@ -75,6 +85,13 @@ func (wp *WorkerPool) Run(jobs []FetchJob) []JobResult {
 	}
 
 	return results
+}
+
+func (wp *WorkerPool) logProgress(label string, completed, total int) {
+	if total == 0 || completed%progressStep != 0 {
+		return
+	}
+	wp.logger.Info("progress", "phase", label, "completed", completed, "total", total)
 }
 
 func (wp *WorkerPool) process(job FetchJob) JobResult {

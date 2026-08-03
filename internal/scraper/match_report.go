@@ -2,11 +2,14 @@ package scraper
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
 )
+
+var goalMinuteRe = regexp.MustCompile(`(\d+)(?:\+(\d+))?\s*’`)
 
 func ParseMatchReport(html string) (ScrapedMatchReport, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
@@ -28,8 +31,72 @@ func ParseMatchReport(html string) (ScrapedMatchReport, error) {
 	parseTeamStats(doc, &report)
 	parseLineups(doc, &report)
 	parsePlayerStats(doc, &report)
+	parseScoringSummary(doc, &report)
 
 	return report, nil
+}
+
+// parseScoringSummary extracts first/second-half goal counts and first-goal
+// minutes from the FBref scoring summary (div.event[id="a"] = home,
+// [id="b"] = away).
+func parseScoringSummary(doc *goquery.Document, report *ScrapedMatchReport) {
+	report.HomeFirstGoalMinute, report.HomeGoalsFirstHalf,
+		report.HomeGoalsSecondHalf, report.HomeSecondGoalMinute = scoringSummary(doc, "a")
+
+	report.AwayFirstGoalMinute, report.AwayGoalsFirstHalf,
+		report.AwayGoalsSecondHalf, report.AwaySecondGoalMinute = scoringSummary(doc, "b")
+}
+
+// scoringSummary returns the first-goal minute (any half), the first- and
+// second-half goal counts, and the first-goal minute in the second half.
+//
+// When the summary exists but the side never scored, counts are 0 and goal
+// minutes are nil. When the summary itself is missing, everything is nil.
+func scoringSummary(doc *goquery.Document, side string) (*int, *int, *int, *int) {
+	firstMinute, secondHalfMinute, firstHalfCount, secondHalfCount := -1, -1, 0, 0
+
+	summary := doc.Find(fmt.Sprintf("div.event[id='%s']", side))
+	if summary.Length() == 0 {
+		return nil, nil, nil, nil
+	}
+
+	summary.Find("div.event_icon.goal").Each(func(_ int, icon *goquery.Selection) {
+		m := goalMinuteRe.FindStringSubmatch(icon.Parent().Text())
+		if m == nil {
+			return
+		}
+
+		base := mustParseInt(m[1])
+		added := 0
+		if m[2] != "" {
+			added = mustParseInt(m[2])
+		}
+
+		total := base + added
+		if firstMinute == -1 || total < firstMinute {
+			firstMinute = total
+		}
+		if base <= 45 {
+			firstHalfCount++
+		} else {
+			secondHalfCount++
+			if secondHalfMinute == -1 || total < secondHalfMinute {
+				secondHalfMinute = total
+			}
+		}
+	})
+
+	if firstMinute == -1 {
+		return nil, &firstHalfCount, &secondHalfCount, nil
+	}
+
+	firstMinutePtr := &firstMinute
+	var secondHalfMinutePtr *int
+	if secondHalfMinute != -1 {
+		secondHalfMinutePtr = &secondHalfMinute
+	}
+
+	return firstMinutePtr, &firstHalfCount, &secondHalfCount, secondHalfMinutePtr
 }
 
 func parseTeamStats(doc *goquery.Document, report *ScrapedMatchReport) {

@@ -60,5 +60,6 @@ func Migrate(db *gorm.DB) error {
 		&MatchPlayerStat{},
 		&MatchSubstitution{},
 		&Fixture{},
+		&Prediction{},
 	)
 }

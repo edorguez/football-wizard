@@ -25,7 +25,14 @@ func setupRepoDB(t *testing.T) *gorm.DB {
 	_, err = sqlDB.Exec("PRAGMA foreign_keys = ON")
 	require.NoError(t, err)
 
-	require.NoError(t, db.AutoMigrate(&database.Team{}, &database.Referee{}, &database.Match{}, &database.MatchStat{}, &database.Fixture{}))
+	require.NoError(t, db.AutoMigrate(
+		&database.Team{},
+		&database.Referee{},
+		&database.Match{},
+		&database.MatchStat{},
+		&database.Fixture{},
+		&database.Prediction{},
+	))
 
 	return db
 }
@@ -64,6 +71,35 @@ func TestTeamRepository_Upsert_Duplicate(t *testing.T) {
 	err := repo.Upsert(team)
 
 	assert.NoError(t, err)
+}
+
+func TestTeamRepository_Search(t *testing.T) {
+	t.Parallel()
+
+	db := setupRepoDB(t)
+	repo := NewTeamRepository(db)
+
+	for _, name := range []string{"Flamengo", "Fluminense", "Palmeiras"} {
+		require.NoError(t, repo.Upsert(&database.Team{Name: name, Country: "Brazil"}))
+	}
+
+	tests := []struct {
+		name  string
+		query string
+		want  int
+	}{
+		{name: "partial", query: "a", want: 2},
+		{name: "specific", query: "Flu", want: 1},
+		{name: "no match", query: "zzz", want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := repo.Search(tt.query)
+			require.NoError(t, err)
+			assert.Len(t, results, tt.want)
+		})
+	}
 }
 
 func TestTeamRepository_FindByName(t *testing.T) {

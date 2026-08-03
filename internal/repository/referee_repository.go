@@ -38,3 +38,9 @@ func (r *RefereeRepository) FindByID(id uint) (*database.Referee, error) {
 	}
 	return &referee, nil
 }
+
+func (r *RefereeRepository) Search(name string) ([]database.Referee, error) {
+	var referees []database.Referee
+	err := r.db.Where("name LIKE ?", "%"+name+"%").Order("name ASC").Limit(20).Find(&referees).Error
+	return referees, err
+}

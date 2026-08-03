@@ -1,6 +1,8 @@
 package scraper
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -104,10 +106,10 @@ func TestParseShotsOnTarget(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name          string
-		text          string
-		wantTotal     *int
-		wantOnTarget  *int
+		name         string
+		text         string
+		wantTotal    *int
+		wantOnTarget *int
 	}{
 		{name: "normal", text: "5 of 12 — 42%", wantTotal: ip(12), wantOnTarget: ip(5)},
 		{name: "reversed order", text: "40% — 7 of 22", wantTotal: ip(22), wantOnTarget: ip(7)},
@@ -115,7 +117,7 @@ func TestParseShotsOnTarget(t *testing.T) {
 		{name: "zero", text: "0 of 0 — 0%", wantTotal: ip(0), wantOnTarget: ip(0)},
 	}
 
-		for _, tt := range tests {
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -169,6 +171,144 @@ func ip(n int) *int {
 	return &n
 }
 
+func TestParseScoringSummary(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		homeHTML      string
+		awayHTML      string
+		wantHomeMin   *int
+		wantAwayMin   *int
+		wantHomeFH    *int
+		wantAwayFH    *int
+		wantHomeSH    *int
+		wantAwaySH    *int
+		wantHomeSHMin *int
+		wantAwaySHMin *int
+	}{
+		{
+			name:          "goals in both halves",
+			homeHTML:      `<div class="event" id="a"><div><a href="/p/1">Hulk</a> · 34’ <div class="event_icon goal"></div></div><div><a href="/p/2">Igor</a> · 75’ <div class="event_icon goal"></div></div></div>`,
+			awayHTML:      `<div class="event" id="b"><div><a href="/p/3">Biel</a> · 12’ <div class="event_icon goal"></div></div></div>`,
+			wantHomeMin:   ip(34),
+			wantAwayMin:   ip(12),
+			wantHomeFH:    ip(1),
+			wantAwayFH:    ip(1),
+			wantHomeSH:    ip(1),
+			wantAwaySH:    ip(0),
+			wantHomeSHMin: ip(75),
+			wantAwaySHMin: nil,
+		},
+		{
+			name:          "stoppage time goal counts as first half",
+			homeHTML:      `<div class="event" id="a"><div><a href="/p/1">Hulk</a> · 45+2’ <div class="event_icon goal"></div></div></div>`,
+			awayHTML:      ``,
+			wantHomeMin:   ip(47),
+			wantAwayMin:   nil,
+			wantHomeFH:    ip(1),
+			wantAwayFH:    nil,
+			wantHomeSH:    ip(0),
+			wantAwaySH:    nil,
+			wantHomeSHMin: nil,
+			wantAwaySHMin: nil,
+		},
+		{
+			name:          "second half only",
+			homeHTML:      `<div class="event" id="a"><div><a href="/p/1">Hulk</a> · 66’ <div class="event_icon goal"></div></div></div>`,
+			awayHTML:      ``,
+			wantHomeMin:   ip(66),
+			wantAwayMin:   nil,
+			wantHomeFH:    ip(0),
+			wantAwayFH:    nil,
+			wantHomeSH:    ip(1),
+			wantAwaySH:    nil,
+			wantHomeSHMin: ip(66),
+			wantAwaySHMin: nil,
+		},
+		{
+			name:          "no scoring summary",
+			homeHTML:      ``,
+			awayHTML:      ``,
+			wantHomeMin:   nil,
+			wantAwayMin:   nil,
+			wantHomeFH:    nil,
+			wantAwayFH:    nil,
+			wantHomeSH:    nil,
+			wantAwaySH:    nil,
+			wantHomeSHMin: nil,
+			wantAwaySHMin: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			html := "<html><body>" + tt.homeHTML + tt.awayHTML + "</body></html>"
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+			require.NoError(t, err)
+
+			var report ScrapedMatchReport
+			parseScoringSummary(doc, &report)
+
+			assertIntPtr(t, tt.wantHomeMin, report.HomeFirstGoalMinute)
+			assertIntPtr(t, tt.wantAwayMin, report.AwayFirstGoalMinute)
+			assertIntPtr(t, tt.wantHomeFH, report.HomeGoalsFirstHalf)
+			assertIntPtr(t, tt.wantAwayFH, report.AwayGoalsFirstHalf)
+			assertIntPtr(t, tt.wantHomeSH, report.HomeGoalsSecondHalf)
+			assertIntPtr(t, tt.wantAwaySH, report.AwayGoalsSecondHalf)
+			assertIntPtr(t, tt.wantHomeSHMin, report.HomeSecondGoalMinute)
+			assertIntPtr(t, tt.wantAwaySHMin, report.AwaySecondGoalMinute)
+		})
+	}
+}
+
+func assertIntPtr(t *testing.T, want, got *int) {
+	if want == nil {
+		assert.Nil(t, got)
+		return
+	}
+	require.NotNil(t, got)
+	assert.Equal(t, *want, *got)
+}
+
+func TestParseScoringSummary_RealCachedHTML(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join("..", "..", "data", "cache", "2025", "reports", "Atlético Mineiro-vs-Bahia.html")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Skipf("cached HTML not available: %v", err)
+	}
+
+	report, err := ParseMatchReport(string(raw))
+	require.NoError(t, err)
+
+	is := assert.New(t)
+	is.Equal("Atlético Mineiro", report.HomeTeam)
+	is.Equal("Bahia", report.AwayTeam)
+
+	require.NotNil(t, report.HomeFirstGoalMinute)
+	is.Equal(66, *report.HomeFirstGoalMinute)
+	is.Nil(report.AwayFirstGoalMinute)
+
+	require.NotNil(t, report.HomeGoalsFirstHalf)
+	is.Equal(0, *report.HomeGoalsFirstHalf)
+	require.NotNil(t, report.AwayGoalsFirstHalf)
+	is.Equal(0, *report.AwayGoalsFirstHalf)
+
+	// Atlético scored all 3 goals in the second half (66', 75', 77').
+	require.NotNil(t, report.HomeGoalsSecondHalf)
+	is.Equal(3, *report.HomeGoalsSecondHalf)
+	require.NotNil(t, report.AwayGoalsSecondHalf)
+	is.Equal(0, *report.AwayGoalsSecondHalf)
+
+	require.NotNil(t, report.HomeSecondGoalMinute)
+	is.Equal(66, *report.HomeSecondGoalMinute)
+	is.Nil(report.AwaySecondGoalMinute)
+}
+
 func TestExtractPct(t *testing.T) {
 	t.Parallel()
 
@@ -197,5 +337,3 @@ func TestExtractPct(t *testing.T) {
 		})
 	}
 }
-
-

@@ -44,3 +44,9 @@ func (r *TeamRepository) ListAll() ([]database.Team, error) {
 	err := r.db.Order("name ASC").Find(&teams).Error
 	return teams, err
 }
+
+func (r *TeamRepository) Search(name string) ([]database.Team, error) {
+	var teams []database.Team
+	err := r.db.Where("name LIKE ?", "%"+name+"%").Order("name ASC").Limit(20).Find(&teams).Error
+	return teams, err
+}

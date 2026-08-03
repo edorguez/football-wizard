@@ -110,5 +110,3 @@ func levelFormat(level slog.Level) (string, string) {
 		return "ERR", "\033[31m"
 	}
 }
-
-

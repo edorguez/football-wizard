@@ -285,10 +285,10 @@ func TestParseNullableFloat(t *testing.T) {
 	row := doc.Find("tr")
 
 	tests := []struct {
-		name  string
-		stat  string
+		name   string
+		stat   string
 		hasVal bool
-		want  float64
+		want   float64
 	}{
 		{name: "valid", stat: "xg_val", hasVal: true, want: 1.5},
 		{name: "empty", stat: "xg_empty", hasVal: false},
